@@ -27,8 +27,8 @@ const uint32_t FONT_RANGE = 255;
 const uint32_t DEFAULT_LIST_EXTENSION = 10;
 const Dosh MONEY_LOSS_PER_SECOND = 100;
 const Dosh MINIMUM_PAYOUT = 500;
-const float PLANET_MINIMUM_RADIUS = 50;
-const float PLANET_MAXIMUM_RADIUS = 150;
+const float PLANET_MINIMUM_RADIUS = 30;
+const float PLANET_MAXIMUM_RADIUS = 80;
 const float PLANET_MINIMUM_GRAVITY = 6;
 const float PLANET_MAXIMUM_GRAVITY = 12;
 const int GAME_OVER_SATELLITE_COUNT = 3; // How many satellites must crash before game over
@@ -37,13 +37,13 @@ const float MAXIMUM_SATELLITE_VELOCITY = 10;
 const float MINIMUM_SATELLITE_VELOCITY = 1;
 const float MAXIMUM_SATELLITE_RADIUS = 4;
 const float MINIMUM_SATELLITE_RADIUS = 1;
-const float MAXIMUM_SATELLITE_DOSH = 2000;
-const float MINIMUM_SATELLITE_DOSH = 750;
-const float SATELLITE_RADIAL_BONUS = 100; // Bonus dosh per radius of a satellite since bigger == more difficult
+const float MAXIMUM_SATELLITE_DOSH = 4000;
+const float MINIMUM_SATELLITE_DOSH = 1500;
+const float SATELLITE_RADIAL_BONUS = 500; // Bonus dosh per radius of a satellite since bigger == more difficult
 const float LAUNCH_DISTANCE = 10; // Distance from the planet satellites are launched from
 const float HUD_OFFSET_X = 8;
 const float HUD_OFFSET_Y = 8;
-const float HUD_BUTTON_WEIGHT = 0.3; // How slow hud buttons move
+const float HUD_BUTTON_WEIGHT = 0.05; // How slow hud buttons move
 vec4 BLACK = {0, 0, 0, 1};
 vec4 WHITE = {1, 1, 1, 1};
 vec4 BLUE = {0, 0, 1, 1};
@@ -226,7 +226,7 @@ Satellite genRandomSatellite(Planet *planet) {
 	sat.radius = MINIMUM_SATELLITE_RADIUS + ((float)rand() / RAND_MAX) * (MAXIMUM_SATELLITE_RADIUS - MINIMUM_SATELLITE_RADIUS);
 	sat.cost = (MINIMUM_SATELLITE_DOSH + ((float)rand() / RAND_MAX) * (MAXIMUM_SATELLITE_DOSH - MINIMUM_SATELLITE_DOSH)) + (sat.radius * SATELLITE_RADIAL_BONUS);
 	sat.x = (GAME_WIDTH / 2) + planet->radius + LAUNCH_DISTANCE;
-	sat.y = (GAME_HEIGHT / 2) + planet->radius + LAUNCH_DISTANCE;
+	sat.y = (GAME_HEIGHT / 2);
 	return sat;
 }
 
@@ -236,18 +236,18 @@ void extendSatelliteList(Game *game) {
 }
 
 // Places the standby satellite into the sat list wherever it can
-void loadStandby(Game *game, float velocity, float direction) {
+void loadStandby(Game *game) {
 	if (game->numSatellites == game->listSize)
 		extendSatelliteList(game);
-	game->standby.velocity = velocity;
-	game->standby.direction = direction;
+	game->standby.velocity = game->player.standbyVelocity;
+	game->standby.direction = game->player.standbyDirection;
 	game->satellites[game->numSatellites] = game->standby;
 	game->standbyCooldown = STANDBY_COOLDOWN;
 	game->numSatellites++;
 }
 
 void drawSatellite(float x, float y, bool drawAtSpecified, Satellite *sat) {
-	vk2dRendererSetColourMod(BLACK);
+	vk2dRendererSetColourMod(YELLOW);
 	if (drawAtSpecified)
 		vk2dRendererDrawCircle(x, y, sat->radius);
 	else
@@ -280,6 +280,7 @@ void setupGame(Game *game) {
 	unloadGame(game);
 	game->numSatellites = 0;
 	game->planet = genRandomPlanet();
+	game->standby = genRandomSatellite(&game->planet);
 	game->player.satellitesCrashed = 0;
 	game->player.score = 0;
 	game->player.standbyDirection = VK2D_PI;
@@ -307,7 +308,33 @@ Status updateGame(Game *game) {
 		game->playing = game->player.satellitesCrashed < GAME_OVER_SATELLITE_COUNT;
 		bool launchButtonPressed = pointInRectangle(game->input.mx, game->input.my, (GAME_WIDTH / 2) - 32, GAME_HEIGHT - HUD_OFFSET_Y - 64, 64, 64) && game->input.lm;
 
-		// TODO: Manage cooldown, decrease payout, and handle buttons
+		// Sliders
+		float velX = HUD_OFFSET_X;
+		float velY = GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texVelocity->img->height;
+		float thetaX = GAME_WIDTH - game->assets.texTheta->img->width - HUD_OFFSET_X;
+		float thetaY = GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texVelocity->img->height;
+		if (pointInRectangle(game->input.mx, game->input.my, velX, velY, 80, 24) && game->input.lm) {
+			float relative = (game->input.mx - velX) / 80;
+			float difference = (MINIMUM_SATELLITE_VELOCITY + (relative * (MAXIMUM_SATELLITE_VELOCITY - MINIMUM_SATELLITE_VELOCITY))) - game->player.standbyVelocity;
+			game->player.standbyVelocity += difference * HUD_BUTTON_WEIGHT;
+		}
+		if (pointInRectangle(game->input.mx, game->input.my, thetaX, thetaY, 80, 24) && game->input.lm) {
+			float relative = (game->input.mx - thetaX) / 80;
+			float difference = (relative * VK2D_PI * 2) - game->player.standbyDirection;
+			game->player.standbyDirection += difference * HUD_BUTTON_WEIGHT;
+		}
+
+		// Launching satellites/cooldown/payout
+		if (game->standbyCooldown != 0) {
+			game->standbyCooldown -= 1;
+		} else if (launchButtonPressed) {
+			loadStandby(game);
+			game->standbyCooldown = STANDBY_COOLDOWN * 60;
+			game->standby = genRandomSatellite(&game->planet);
+		} else {
+			game->standby.cost -= MONEY_LOSS_PER_SECOND / 60;
+			game->standby.cost = game->standby.cost < MINIMUM_PAYOUT ? MINIMUM_PAYOUT : game->standby.cost;
+		}
 	}
 
 	if (game->input.keys[SDL_SCANCODE_RETURN])
@@ -331,10 +358,9 @@ void drawGame(Game *game) {
 		/******************** Draw the HUD ********************/
 		// Standby
 		if (game->standbyCooldown == 0) {
-			drawFontNumber(game->font, "STANDBY DOSH: ", game->standby.cost, HUD_OFFSET_X, HUD_OFFSET_Y);
-			drawSatellite(HUD_OFFSET_X + 16, HUD_OFFSET_Y + 20, true, &game->standby);
+			drawFontNumber(game->font, "JOB PAYOUT: ", game->standby.cost, HUD_OFFSET_X, HUD_OFFSET_Y);
 		} else {
-			drawFontNumber(game->font, "COOLDOWN: ", (game->standbyCooldown / 60), HUD_OFFSET_X, HUD_OFFSET_Y);
+			drawFontNumber(game->font, "NEXT JOB: ", (game->standbyCooldown / 60), HUD_OFFSET_X, HUD_OFFSET_Y);
 		}
 
 		// Buttons
@@ -359,6 +385,13 @@ void drawGame(Game *game) {
 		vk2dRendererSetColourMod(RED);
 		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (18 * 8), HUD_OFFSET_Y + 17, (game->player.satellitesCrashed / GAME_OVER_SATELLITE_COUNT) * (18 * 8), 4);
 		vk2dRendererSetColourMod(DEFAULT_COLOUR);
+
+		drawFont(game->font, "PLANET GRAVITY", GAME_WIDTH - HUD_OFFSET_X - (14 * 8), HUD_OFFSET_Y + 23);
+		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (14 * 8), HUD_OFFSET_Y + 23 + 17, 14 * 8, 4);
+		vk2dRendererSetColourMod(RED);
+		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (14 * 8), HUD_OFFSET_Y + 17 + 23, ((game->planet.gravity - PLANET_MINIMUM_GRAVITY) / (PLANET_MAXIMUM_GRAVITY - PLANET_MINIMUM_GRAVITY)) * (14 * 8), 4);
+		vk2dRendererSetColourMod(DEFAULT_COLOUR);
+
 	} else {
 		vk2dDrawTexture(game->assets.texGameOver, 0, 0);
 		// TODO: Show high score and user score
