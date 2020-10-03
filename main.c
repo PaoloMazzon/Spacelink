@@ -5,6 +5,13 @@
 //     1. launch shit into orbit at a given speed and angle
 //     2. they continue to orbit until they crash into earth or other shit u launched
 //     3. the longer you take to launch it the less money you make on the launch and money is ur score but a satellite down is hefty cost and 3 down = lose
+//
+// TODO:
+//   1. Cap angle to something reasonable
+//   2. Collisions/fail state
+//   3. Decent menu (sound settings, plot, controls, logo)
+//   4. High scores
+//   5. Baller soundtrack and better graphics
 #define SDL_MAIN_HANDLED
 #include "VK2D/VK2D.h"
 #include "VK2D/Image.h"
@@ -39,6 +46,8 @@ const float MAXIMUM_SATELLITE_RADIUS = 4;
 const float MINIMUM_SATELLITE_RADIUS = 1;
 const float MAXIMUM_SATELLITE_DOSH = 4000;
 const float MINIMUM_SATELLITE_DOSH = 1500;
+const float MAXIMUM_SATELLITE_ANGLE = (VK2D_PI * 3) / 2;
+const float MINIMUM_SATELLITE_ANGLE = VK2D_PI / 2;
 const float SATELLITE_RADIAL_BONUS = 500; // Bonus dosh per radius of a satellite since bigger == more difficult
 const float LAUNCH_DISTANCE = 10; // Distance from the planet satellites are launched from
 const float HUD_OFFSET_X = 8;
@@ -208,7 +217,7 @@ void drawFontNumber(Font font, const char *string, float num, float x, float y) 
 
 void destroyFont(Font font) {
 	uint32_t i;
-	for (i = 0; i < FONT_RANGE; i++)
+	for (i = 0; i <= FONT_RANGE; i++)
 		if (font.characters[i] != NULL)
 			vk2dTextureFree(font.characters[i]);
 	vk2dImageFree(font.sheet);
@@ -296,6 +305,7 @@ void setupGame(Game *game) {
 	game->player.score = 0;
 	game->player.standbyDirection = VK2D_PI;
 	game->player.standbyVelocity = MINIMUM_SATELLITE_VELOCITY;
+	game->player.standbyDirection = MINIMUM_SATELLITE_ANGLE;
 	game->playing = true;
 	game->standbyCooldown = STANDBY_COOLDOWN * 60;
 }
@@ -331,7 +341,7 @@ Status updateGame(Game *game) {
 		}
 		if (pointInRectangle(game->input.mx, game->input.my, thetaX, thetaY, 80, 24) && game->input.lm) {
 			float relative = (game->input.mx - thetaX) / 80;
-			float difference = (relative * VK2D_PI * 2) - game->player.standbyDirection;
+			float difference = (MINIMUM_SATELLITE_ANGLE + (relative * (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE))) - game->player.standbyDirection;
 			game->player.standbyDirection += difference * HUD_BUTTON_WEIGHT;
 		}
 
@@ -379,7 +389,7 @@ void drawGame(Game *game) {
 		vk2dDrawTexture(game->assets.texVelocity, HUD_OFFSET_X, GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texVelocity->img->height);
 		vk2dDrawTexture(game->assets.texTheta, GAME_WIDTH - game->assets.texTheta->img->width - HUD_OFFSET_X, GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texVelocity->img->height);
 		vk2dDrawTexture(game->assets.texPointer, (HUD_OFFSET_X + ((game->player.standbyVelocity - MINIMUM_SATELLITE_VELOCITY) / (MAXIMUM_SATELLITE_VELOCITY - MINIMUM_SATELLITE_VELOCITY)) * game->assets.texVelocity->img->width) - 7, GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texVelocity->img->height);
-		vk2dDrawTexture(game->assets.texPointer, (GAME_WIDTH - game->assets.texTheta->img->width - HUD_OFFSET_X + (game->player.standbyDirection / (2 * VK2D_PI)) * game->assets.texVelocity->img->width) - 7, GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texTheta->img->height);
+		vk2dDrawTexture(game->assets.texPointer, (GAME_WIDTH - game->assets.texTheta->img->width - HUD_OFFSET_X + ((game->player.standbyDirection - MINIMUM_SATELLITE_ANGLE) / (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE)) * game->assets.texVelocity->img->width) - 7, GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texTheta->img->height);
 		uint32_t index = 0;
 		float x = (GAME_WIDTH / 2) - 32;
 		float y = GAME_HEIGHT - HUD_OFFSET_Y - 64;
@@ -574,6 +584,8 @@ void spacelink(int windowWidth, int windowHeight) {
 	vk2dTextureFree(texCursor);
 	vk2dTextureFree(texGameOver);
 	vk2dTextureFree(texTheta);
+	vk2dTextureFree(texCannon);
+	vk2dImageFree(imgCannon);
 	vk2dImageFree(imgTheta);
 	vk2dTextureFree(texVelocity);
 	vk2dImageFree(imgVelocity);
