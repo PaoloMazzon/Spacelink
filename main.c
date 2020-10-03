@@ -66,6 +66,7 @@ const char *LAUNCH_PNG = "assets/launch.png";
 const char *THETA_PNG = "assets/theta.png";
 const char *VELOCITY_PNG = "assets/velocity.png";
 const char *POINTER_PNG = "assets/pointer.png";
+const char *CANNON_PNG = "assets/cannon.png";
 
 /******************** Structs ********************/
 // UBO for the post-fx shader
@@ -127,6 +128,7 @@ typedef struct Assets {
 	VK2DTexture texTheta;
 	VK2DTexture texVelocity;
 	VK2DTexture texPointer;
+	VK2DTexture texCannon;
 } Assets;
 
 // Big boy struct holding info for basically everything
@@ -359,6 +361,7 @@ void drawGame(Game *game) {
 		vk2dRendererSetColourMod(PLANET_COLOUR);
 		vk2dDrawCircle(GAME_WIDTH / 2, GAME_HEIGHT / 2, game->planet.radius);
 		vk2dRendererSetColourMod(DEFAULT_COLOUR);
+		vk2dRendererDrawTexture(game->assets.texCannon, (GAME_WIDTH / 2) + game->planet.radius - 4, (GAME_HEIGHT / 2) - 6, 1, 1, game->player.standbyDirection + VK2D_PI, 4, 6);
 
 		// Draw all satellites
 		for (uint32_t i = 0; i < game->numSatellites; i++)
@@ -446,9 +449,11 @@ void spacelink(int windowWidth, int windowHeight) {
 	VK2DImage imgVelocity = vk2dImageLoad(vk2dRendererGetDevice(), VELOCITY_PNG);
 	VK2DImage imgPointer = vk2dImageLoad(vk2dRendererGetDevice(), POINTER_PNG);
 	VK2DImage imgLaunch = vk2dImageLoad(vk2dRendererGetDevice(), LAUNCH_PNG);
+	VK2DImage imgCannon = vk2dImageLoad(vk2dRendererGetDevice(), CANNON_PNG);
 	VK2DTexture texTheta = vk2dTextureLoad(imgTheta, 0, 0, 80, 24);
 	VK2DTexture texVelocity = vk2dTextureLoad(imgVelocity, 0, 0, 80, 24);
 	VK2DTexture texPointer = vk2dTextureLoad(imgPointer, 0, 0, 15, 9);
+	VK2DTexture texCannon = vk2dTextureLoad(imgCannon, 0, 0, 23, 13);
 	VK2DTexture texLaunch[3];
 	texLaunch[0] = vk2dTextureLoad(imgLaunch, 0, 0, 64, 64);
 	texLaunch[1] = vk2dTextureLoad(imgLaunch, 64, 0, 64, 64);
@@ -469,6 +474,7 @@ void spacelink(int windowWidth, int windowHeight) {
 	game.assets.texPointer = texPointer;
 	game.assets.texTheta = texTheta;
 	game.assets.texVelocity = texVelocity;
+	game.assets.texCannon = texCannon;
 	const uint32_t starCount = 50;
 	Star stars[starCount];
 	for (uint32_t i = 0; i < starCount; i++) {
