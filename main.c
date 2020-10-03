@@ -52,6 +52,8 @@ const float LAUNCH_DISTANCE = 20; // Distance from the planet satellites are lau
 const float HUD_OFFSET_X = 8;
 const float HUD_OFFSET_Y = 8;
 const float HUD_BUTTON_WEIGHT = 0.05; // How slow hud buttons move
+const float VELOCITY_VARIANCE = (MAXIMUM_SATELLITE_VELOCITY - MINIMUM_SATELLITE_VELOCITY) * 0.1;
+const float THETA_VARIANCE = (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE) * 0.1;
 vec4 BLACK = {0, 0, 0, 1};
 vec4 WHITE = {1, 1, 1, 1};
 vec4 BLUE = {0, 0, 1, 1};
@@ -153,6 +155,7 @@ typedef struct Game {
 	uint32_t numSatellites;
 	Satellite standby; // satellite waiting to be launched
 	float standbyCooldown; // This is in frames
+	float time; // current frame
 } Game;
 
 /******************** Helper functions ********************/
@@ -174,6 +177,10 @@ static inline float pointDistance(float x1, float y1, float x2, float y2) {
 
 static inline bool pointInRectangle(float x, float y, float x1, float y1, float w, float h) {
 	return (x >= x1 && x <= x1 + w && y >= y1 && y <= y1 + h);
+}
+
+static inline absf(float f) {
+	return f < 0 ? -f : f;
 }
 
 static float clamp(float x, float min, float max) {
@@ -276,6 +283,11 @@ void removeSatellite(Game *game, uint32_t index) {
 	game->numSatellites--;
 }
 
+void satelliteCrashEffects(Game *game, float x, float y) {
+	game->player.satellitesCrashed++;
+	// TODO: Some SICK effects
+}
+
 // This will delete itself and any satellites it hits on a collision as well as update score and all that
 void updateSatellite(Game *game, uint32_t index) {
 	Satellite *sat = &game->satellites[index];
@@ -287,7 +299,25 @@ void updateSatellite(Game *game, uint32_t index) {
 	float v3y = (sinf(sat->direction) * sat->velocity) + (sinf(angle) * (game->planet.gravity));// / 60));
 	sat->velocity = sqrtf(powf(v3x, 2) + powf(v3y, 2));
 	sat->direction = atan2f(v3y, v3x);
-	// TODO: Collisions
+
+	// Check collisions with every other satellite and the planet
+	if (absf(pointDistance(sat->x, sat->y, GAME_WIDTH / 2, GAME_HEIGHT / 2)) < game->planet.radius) { // planet collisions are a bit forgiving b/c doesn't factor in sat radius
+		satelliteCrashEffects(game, sat->x, sat->y);
+		removeSatellite(game, index);
+	} else {
+		bool dead = false;
+		for (uint32_t i = 0; i < game->numSatellites && !dead; i++) {
+			if (i != index && absf(pointDistance(sat->x, sat->y, game->satellites[i].x, game->satellites[i].y)) < game->satellites[i].radius + sat->radius) {
+				dead = true;
+				satelliteCrashEffects(game, sat->x, sat->y);
+				removeSatellite(game, index);
+				if (i > index) // because removing the first satellite moves everything ahead of it in the list back 1
+					removeSatellite(game, i - 1);
+				else
+					removeSatellite(game, i);
+			}
+		}
+	}
 }
 
 /****************** Game functions ******************/
@@ -315,46 +345,49 @@ void setupGame(Game *game) {
 
 Status updateGame(Game *game) {
 	static bool clickTheta, clickVelocity; // For when the user drags the pointer outside the box
-	if (game->playing) {
-		// Process satellites
-		for (uint32_t i = 0; i < game->numSatellites; i++)
-			updateSatellite(game, i);
-		game->playing = game->player.satellitesCrashed < GAME_OVER_SATELLITE_COUNT;
-		bool launchButtonPressed = pointInRectangle(game->input.mx, game->input.my, (GAME_WIDTH / 2) - 32, GAME_HEIGHT - HUD_OFFSET_Y - 64, 64, 64) && game->input.lm;
+	// Process satellites
+	for (uint32_t i = 0; i < game->numSatellites; i++)
+		updateSatellite(game, i);
+	game->playing = game->player.satellitesCrashed < GAME_OVER_SATELLITE_COUNT;
+	bool launchButtonPressed = pointInRectangle(game->input.mx, game->input.my, (GAME_WIDTH / 2) - 32, GAME_HEIGHT - HUD_OFFSET_Y - 64, 64, 64) && game->input.lm;
 
-		// Sliders
-		float velX = HUD_OFFSET_X;
-		float velY = GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texVelocity->img->height;
-		float thetaX = GAME_WIDTH - game->assets.texTheta->img->width - HUD_OFFSET_X;
-		float thetaY = GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texVelocity->img->height;
-		if ((pointInRectangle(game->input.mx, game->input.my, velX, velY, 80, 24) && game->input.lm && !clickTheta) || (clickVelocity && !clickTheta)) {
-			float relative = clamp((game->input.mx - velX) / 80, 0, 1);
-			float difference = (MINIMUM_SATELLITE_VELOCITY + (relative * (MAXIMUM_SATELLITE_VELOCITY - MINIMUM_SATELLITE_VELOCITY))) - game->player.standbyVelocity;
-			game->player.standbyVelocity += difference * HUD_BUTTON_WEIGHT;
-			clickVelocity = true;
-		}
-		if ((pointInRectangle(game->input.mx, game->input.my, thetaX, thetaY, 80, 24) && game->input.lm && !clickVelocity) || (clickTheta && !clickVelocity)) {
-			float relative = clamp((game->input.mx - thetaX) / 80, 0, 1);
-			float difference = (MINIMUM_SATELLITE_ANGLE + (relative * (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE))) - game->player.standbyDirection;
-			game->player.standbyDirection += difference * HUD_BUTTON_WEIGHT;
-			clickTheta = true;
-		}
-		if (!game->input.lm) {
-			clickTheta = false;
-			clickVelocity = false;
-		}
+	// Sliders
+	float velX = HUD_OFFSET_X;
+	float velY = GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texVelocity->img->height;
+	float thetaX = GAME_WIDTH - game->assets.texTheta->img->width - HUD_OFFSET_X;
+	float thetaY = GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texVelocity->img->height;
+	float time = game->time / 60;
+	game->player.standbyVelocity += sinf(time) * (VELOCITY_VARIANCE / 60);
+	game->player.standbyDirection += sinf(time) * (THETA_VARIANCE / 60);
+	game->player.standbyDirection = clamp(game->player.standbyDirection, MINIMUM_SATELLITE_ANGLE, MAXIMUM_SATELLITE_ANGLE);
+	game->player.standbyVelocity = clamp(game->player.standbyVelocity, MINIMUM_SATELLITE_VELOCITY, MAXIMUM_SATELLITE_VELOCITY);
+	if ((pointInRectangle(game->input.mx, game->input.my, velX, velY, 80, 24) && game->input.lm && !clickTheta) || (clickVelocity && !clickTheta)) {
+		float relative = clamp((game->input.mx - velX) / 80, 0, 1);
+		float difference = (MINIMUM_SATELLITE_VELOCITY + (relative * (MAXIMUM_SATELLITE_VELOCITY - MINIMUM_SATELLITE_VELOCITY))) - game->player.standbyVelocity;
+		game->player.standbyVelocity += difference * HUD_BUTTON_WEIGHT;
+		clickVelocity = true;
+	}
+	if ((pointInRectangle(game->input.mx, game->input.my, thetaX, thetaY, 80, 24) && game->input.lm && !clickVelocity) || (clickTheta && !clickVelocity)) {
+		float relative = clamp((game->input.mx - thetaX) / 80, 0, 1);
+		float difference = (MINIMUM_SATELLITE_ANGLE + (relative * (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE))) - game->player.standbyDirection;
+		game->player.standbyDirection += difference * HUD_BUTTON_WEIGHT;
+		clickTheta = true;
+	}
+	if (!game->input.lm) {
+		clickTheta = false;
+		clickVelocity = false;
+	}
 
-		// Launching satellites/cooldown/payout
-		if (game->standbyCooldown != 0) {
-			game->standbyCooldown -= 1;
-		} else if (launchButtonPressed && !clickVelocity && !clickTheta) {
-			loadStandby(game);
-			game->standbyCooldown = STANDBY_COOLDOWN * 60;
-			game->standby = genRandomSatellite(&game->planet);
-		} else {
-			game->standby.cost -= MONEY_LOSS_PER_SECOND / 60;
-			game->standby.cost = game->standby.cost < MINIMUM_PAYOUT ? MINIMUM_PAYOUT : game->standby.cost;
-		}
+	// Launching satellites/cooldown/payout
+	if (game->standbyCooldown != 0) {
+		game->standbyCooldown -= 1;
+	} else if (launchButtonPressed && !clickVelocity && !clickTheta && game->playing) {
+		loadStandby(game);
+		game->standbyCooldown = STANDBY_COOLDOWN * 60;
+		game->standby = genRandomSatellite(&game->planet);
+	} else {
+		game->standby.cost -= MONEY_LOSS_PER_SECOND / 60;
+		game->standby.cost = game->standby.cost < MINIMUM_PAYOUT ? MINIMUM_PAYOUT : game->standby.cost;
 	}
 
 	if (game->input.keys[SDL_SCANCODE_RETURN])
@@ -365,17 +398,17 @@ Status updateGame(Game *game) {
 }
 
 void drawGame(Game *game) {
+	// Draw planet
+	vk2dRendererSetColourMod(PLANET_COLOUR);
+	vk2dDrawCircle(GAME_WIDTH / 2, GAME_HEIGHT / 2, game->planet.radius);
+	vk2dRendererSetColourMod(DEFAULT_COLOUR);
+	vk2dRendererDrawTexture(game->assets.texCannon, (GAME_WIDTH / 2) + game->planet.radius - 4, (GAME_HEIGHT / 2) - 6, 1, 1, game->player.standbyDirection + VK2D_PI, 4, 6);
+
+	// Draw all satellites
+	for (uint32_t i = 0; i < game->numSatellites; i++)
+		drawSatellite(0, 0, false, &game->satellites[i]);
+
 	if (game->playing) {
-		// Draw planet
-		vk2dRendererSetColourMod(PLANET_COLOUR);
-		vk2dDrawCircle(GAME_WIDTH / 2, GAME_HEIGHT / 2, game->planet.radius);
-		vk2dRendererSetColourMod(DEFAULT_COLOUR);
-		vk2dRendererDrawTexture(game->assets.texCannon, (GAME_WIDTH / 2) + game->planet.radius - 4, (GAME_HEIGHT / 2) - 6, 1, 1, game->player.standbyDirection + VK2D_PI, 4, 6);
-
-		// Draw all satellites
-		for (uint32_t i = 0; i < game->numSatellites; i++)
-			drawSatellite(0, 0, false, &game->satellites[i]);
-
 		/******************** Draw the HUD ********************/
 		// Standby
 		if (game->standbyCooldown == 0) {
@@ -404,7 +437,7 @@ void drawGame(Game *game) {
 		drawFont(game->font, "CRASHED SATELLITES", GAME_WIDTH - HUD_OFFSET_X - (18 * 8), HUD_OFFSET_Y);
 		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (18 * 8), HUD_OFFSET_Y + 17, 18 * 8, 4);
 		vk2dRendererSetColourMod(RED);
-		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (18 * 8), HUD_OFFSET_Y + 17, (game->player.satellitesCrashed / GAME_OVER_SATELLITE_COUNT) * (18 * 8), 4);
+		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (18 * 8), HUD_OFFSET_Y + 17, clamp(((float)game->player.satellitesCrashed / GAME_OVER_SATELLITE_COUNT), 0, 1) * (18 * 8), 4);
 		vk2dRendererSetColourMod(DEFAULT_COLOUR);
 
 		drawFont(game->font, "PLANET GRAVITY", GAME_WIDTH - HUD_OFFSET_X - (14 * 8), HUD_OFFSET_Y + 23);
@@ -536,6 +569,7 @@ void spacelink(int windowWidth, int windowHeight) {
 				setupGame(&game);
 			}
 		}
+		game.time += 1;
 
 		/******************** Begin drawing ********************/
 		vk2dRendererStartFrame(WHITE);
