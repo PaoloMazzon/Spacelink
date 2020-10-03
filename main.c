@@ -7,8 +7,9 @@
 //     3. the longer you take to launch it the less money you make on the launch and money is ur score but a satellite down is hefty cost and 3 down = lose
 //
 // TODO:
+//   1. Indication of upcoming satellite with like name/portrait of company
 //   2. Decent menu (sound settings, plot, controls, logo)
-//   4. Baller soundtrack and better graphics
+//   3. Baller soundtrack and better graphics
 #define SDL_MAIN_HANDLED
 #include "VK2D/VK2D.h"
 #include "VK2D/Image.h"
@@ -60,6 +61,8 @@ const float VELOCITY_SLIDER_X = HUD_OFFSET_X;
 const float VELOCITY_SLIDER_Y = GAME_HEIGHT - HUD_OFFSET_Y - SLIDER_H;
 const float LAUNCH_BUTTON_X = (GAME_WIDTH / 2) - 32 + 8;
 const float LAUNCH_BUTTON_Y = GAME_HEIGHT - HUD_OFFSET_Y - 64;
+const float SHAKE_INTENSITY = 5;
+const float SHAKE_DURATION = 0.2;
 vec4 BLACK = {0, 0, 0, 1};
 vec4 WHITE = {1, 1, 1, 1};
 vec4 BLUE = {0, 0, 1, 1};
@@ -174,6 +177,7 @@ typedef struct Game {
 	float time; // current frame
 	bool clickTheta, clickVelocity;
 	Dosh highscore;
+	float shakeDuration;
 } Game;
 
 /******************** Helper functions ********************/
@@ -317,7 +321,7 @@ void removeSatellite(Game *game, uint32_t index) {
 
 void satelliteCrashEffects(Game *game, float x, float y) {
 	game->player.satellitesCrashed++;
-	// TODO: Some SICK effects
+	game->shakeDuration = SHAKE_DURATION * 60;
 }
 
 // This will delete itself and any satellites it hits on a collision as well as update score and all that
@@ -440,9 +444,7 @@ Status updateGame(Game *game) {
 
 void drawGame(Game *game) {
 	// Draw planet
-	vk2dRendererSetColourMod(PLANET_COLOUR);
-	vk2dDrawCircle(GAME_WIDTH / 2, GAME_HEIGHT / 2, game->planet.radius);
-	vk2dRendererSetColourMod(DEFAULT_COLOUR);
+	vk2dRendererDrawTexture(game->assets.texPlanet, (GAME_WIDTH / 2) - game->planet.radius, (GAME_HEIGHT / 2) - game->planet.radius, (game->planet.radius / 100) * 2, (game->planet.radius / 100) * 2, -(game->time / 180), 50, 50);
 	vk2dRendererDrawTexture(game->assets.texCannon, (GAME_WIDTH / 2) + game->planet.radius - 4, (GAME_HEIGHT / 2) - 6, 1, 1, game->player.standbyDirection + VK2D_PI, 4, 6);
 
 	// Draw all satellites
@@ -634,6 +636,17 @@ void spacelink(int windowWidth, int windowHeight) {
 			}
 		}
 		game.time += 1;
+
+		// Handle screen shake
+		game.shakeDuration--;
+		if (game.shakeDuration <= 0) {
+			cam.x = 0;
+			cam.y = 0;
+		} else {
+			cam.x = ((float)rand() / RAND_MAX) * SHAKE_INTENSITY;
+			cam.y = ((float)rand() / RAND_MAX) * SHAKE_INTENSITY;
+		}
+		vk2dRendererSetCamera(cam);
 
 		/******************** Begin drawing ********************/
 		vk2dRendererStartFrame(WHITE);
