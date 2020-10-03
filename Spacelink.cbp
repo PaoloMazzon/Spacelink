@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CodeBlocks_project_file>
+	<FileVersion major="1" minor="6"/>
+	<Project>
+		<Option title="Spacelink"/>
+		<Option makefile_is_custom="1"/>
+		<Option compiler="gcc"/>
+		<Option virtualFolders="CMake Files\;CMake Files\..\;CMake Files\..\..\;CMake Files\..\..\..\;CMake Files\..\..\..\..\;CMake Files\..\..\..\..\msys64\;CMake Files\..\..\..\..\msys64\mingw64\;CMake Files\..\..\..\..\msys64\mingw64\lib\;CMake Files\..\..\..\..\msys64\mingw64\lib\cmake\;CMake Files\..\..\..\..\msys64\mingw64\lib\cmake\SDL2\;"/>
+		<Build>
+			<Target title="all">
+				<Option working_dir="C:/Users/lugi1/C/Spacelink"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 all"/>
+					<CompileFile command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="rebuild_cache">
+				<Option working_dir="C:/Users/lugi1/C/Spacelink"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 rebuild_cache"/>
+					<CompileFile command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="Spacelink">
+				<Option output="C:/Users/lugi1/C/Spacelink/Spacelink.exe" prefix_auto="0" extension_auto="0"/>
+				<Option working_dir="C:/Users/lugi1/C/Spacelink"/>
+				<Option object_output="./"/>
+				<Option type="1"/>
+				<Option compiler="gcc"/>
+				<Compiler>
+					<Add directory="C:/Users/lugi1/C/Spacelink/./include"/>
+					<Add directory="C:/Users/lugi1/C/Spacelink/./Vulkan2D"/>
+					<Add directory="C:/msys64/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/include"/>
+					<Add directory="C:/msys64/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../include"/>
+					<Add directory="C:/msys64/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/include-fixed"/>
+					<Add directory="C:/msys64/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../x86_64-w64-mingw32/include"/>
+				</Compiler>
+				<MakeCommands>
+					<Build command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 Spacelink"/>
+					<CompileFile command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="Spacelink/fast">
+				<Option output="C:/Users/lugi1/C/Spacelink/Spacelink.exe" prefix_auto="0" extension_auto="0"/>
+				<Option working_dir="C:/Users/lugi1/C/Spacelink"/>
+				<Option object_output="./"/>
+				<Option type="1"/>
+				<Option compiler="gcc"/>
+				<Compiler>
+					<Add directory="C:/Users/lugi1/C/Spacelink/./include"/>
+					<Add directory="C:/Users/lugi1/C/Spacelink/./Vulkan2D"/>
+					<Add directory="C:/msys64/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/include"/>
+					<Add directory="C:/msys64/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../include"/>
+					<Add directory="C:/msys64/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/include-fixed"/>
+					<Add directory="C:/msys64/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/8.3.0/../../../../x86_64-w64-mingw32/include"/>
+				</Compiler>
+				<MakeCommands>
+					<Build command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 Spacelink/fast"/>
+					<CompileFile command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+			<Target title="edit_cache">
+				<Option working_dir="C:/Users/lugi1/C/Spacelink"/>
+				<Option type="4"/>
+				<MakeCommands>
+					<Build command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 edit_cache"/>
+					<CompileFile command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 &quot;$file&quot;"/>
+					<Clean command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 clean"/>
+					<DistClean command="C:/msys64/mingw64/bin/mingw32-make.exe -f &quot;C:/Users/lugi1/C/Spacelink/Makefile&quot;  VERBOSE=1 clean"/>
+				</MakeCommands>
+			</Target>
+		</Build>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Buffer.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Buffer.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Constants.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Constants.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/DescriptorControl.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/DescriptorControl.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Image.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Image.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Initializers.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Initializers.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/LogicalDevice.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/LogicalDevice.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/PhysicalDevice.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/PhysicalDevice.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Pipeline.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Pipeline.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Polygon.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Polygon.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Renderer.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Renderer.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Shader.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Shader.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Texture.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Texture.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Util.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Validation.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/Vulkan2D/VK2D/Validation.h">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/main.c">
+			<Option target="Spacelink"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/CMakeLists.txt">
+			<Option virtualFolder="CMake Files\"/>
+		</Unit>
+		<Unit filename="C:/Users/lugi1/C/Spacelink/../../../../msys64/mingw64/lib/cmake/SDL2/sdl2-config.cmake">
+			<Option virtualFolder="CMake Files\..\..\..\..\msys64\mingw64\lib\cmake\SDL2\"/>
+		</Unit>
+	</Project>
+</CodeBlocks_project_file>
