@@ -41,8 +41,9 @@ const float MAXIMUM_SATELLITE_DOSH = 2000;
 const float MINIMUM_SATELLITE_DOSH = 750;
 const float SATELLITE_RADIAL_BONUS = 100; // Bonus dosh per radius of a satellite since bigger == more difficult
 const float LAUNCH_DISTANCE = 10; // Distance from the planet satellites are launched from
-const float HUD_OFFSET_X = 2;
-const float HUD_OFFSET_Y = 2;
+const float HUD_OFFSET_X = 8;
+const float HUD_OFFSET_Y = 8;
+const float HUD_BUTTON_WEIGHT = 0.3; // How slow hud buttons move
 vec4 BLACK = {0, 0, 0, 1};
 vec4 WHITE = {1, 1, 1, 1};
 vec4 BLUE = {0, 0, 1, 1};
@@ -61,6 +62,10 @@ const char *CURSOR_PNG = "assets/cursor.png";
 const char *SHADER_FX_VERTEX = "assets/vert.spv";
 const char *SHADER_FX_FRAGMENT = "assets/frag.spv";
 const char *GAMEOVER_PNG = "assets/gameover.png";
+const char *LAUNCH_PNG = "assets/launch.png";
+const char *THETA_PNG = "assets/theta.png";
+const char *VELOCITY_PNG = "assets/velocity.png";
+const char *POINTER_PNG = "assets/pointer.png";
 
 /******************** Structs ********************/
 // UBO for the post-fx shader
@@ -94,6 +99,8 @@ typedef struct Planet {
 // Player information for things like score and satellites crashed - will be singleton
 typedef struct Player {
 	int satellitesCrashed;
+	float standbyVelocity;
+	float standbyDirection;
 	Dosh score;
 } Player;
 
@@ -116,6 +123,10 @@ typedef struct Input {
 // Collection of needed assets
 typedef struct Assets {
 	VK2DTexture texGameOver;
+	VK2DTexture texLaunchButton[3]; // normal, hover, pressed
+	VK2DTexture texTheta;
+	VK2DTexture texVelocity;
+	VK2DTexture texPointer;
 } Assets;
 
 // Big boy struct holding info for basically everything
@@ -130,7 +141,6 @@ typedef struct Game {
 	Satellite *satellites;
 	uint32_t listSize;
 	uint32_t numSatellites;
-	Dosh line; // Money on the line for current project
 	Satellite standby; // satellite waiting to be launched
 	float standbyCooldown; // This is in frames
 } Game;
@@ -150,6 +160,10 @@ static inline float pointAngle(float x1, float y1, float x2, float y2) {
 
 static inline float pointDistance(float x1, float y1, float x2, float y2) {
 	return sqrtf(powf(y2 - y1, 2) + powf(x2 - x1, 2));
+}
+
+static inline bool pointInRectangle(float x, float y, float x1, float y1, float w, float h) {
+	return (x >= x1 && x <= x1 + w && y >= y1 && y <= y1 + h);
 }
 
 // Loads a font spritesheet into a font assuming each character is width*height and starting index startIndex
@@ -268,7 +282,8 @@ void setupGame(Game *game) {
 	game->planet = genRandomPlanet();
 	game->player.satellitesCrashed = 0;
 	game->player.score = 0;
-	game->line = 0;
+	game->player.standbyDirection = VK2D_PI;
+	game->player.standbyVelocity = MINIMUM_SATELLITE_VELOCITY;
 	game->playing = true;
 	game->standbyCooldown = STANDBY_COOLDOWN * 60;
 }
@@ -286,7 +301,13 @@ Status updateGame(Game *game) {
 	 */
 
 	if (game->playing) {
-		// TODO: This
+		// Process satellites
+		for (uint32_t i = 0; i < game->numSatellites; i++)
+			updateSatellite(game, i);
+		game->playing = game->player.satellitesCrashed < GAME_OVER_SATELLITE_COUNT;
+		bool launchButtonPressed = pointInRectangle(game->input.mx, game->input.my, (GAME_WIDTH / 2) - 32, GAME_HEIGHT - HUD_OFFSET_Y - 64, 64, 64) && game->input.lm;
+
+		// TODO: Manage cooldown, decrease payout, and handle buttons
 	}
 
 	if (game->input.keys[SDL_SCANCODE_RETURN])
@@ -307,13 +328,37 @@ void drawGame(Game *game) {
 		for (uint32_t i = 0; i < game->numSatellites; i++)
 			drawSatellite(0, 0, false, &game->satellites[i]);
 
-		// Draw the HUD
+		/******************** Draw the HUD ********************/
+		// Standby
 		if (game->standbyCooldown == 0) {
-			drawFont(game->font, "STANDBY", HUD_OFFSET_X, HUD_OFFSET_Y);
+			drawFontNumber(game->font, "STANDBY DOSH: ", game->standby.cost, HUD_OFFSET_X, HUD_OFFSET_Y);
 			drawSatellite(HUD_OFFSET_X + 16, HUD_OFFSET_Y + 20, true, &game->standby);
 		} else {
 			drawFontNumber(game->font, "COOLDOWN: ", (game->standbyCooldown / 60), HUD_OFFSET_X, HUD_OFFSET_Y);
 		}
+
+		// Buttons
+		vk2dDrawTexture(game->assets.texVelocity, HUD_OFFSET_X, GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texVelocity->img->height);
+		vk2dDrawTexture(game->assets.texTheta, GAME_WIDTH - game->assets.texTheta->img->width - HUD_OFFSET_X, GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texVelocity->img->height);
+		vk2dDrawTexture(game->assets.texPointer, (HUD_OFFSET_X + ((game->player.standbyVelocity - MINIMUM_SATELLITE_VELOCITY) / (MAXIMUM_SATELLITE_VELOCITY - MINIMUM_SATELLITE_VELOCITY)) * game->assets.texVelocity->img->width) - 7, GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texVelocity->img->height);
+		vk2dDrawTexture(game->assets.texPointer, (GAME_WIDTH - game->assets.texTheta->img->width - HUD_OFFSET_X + (game->player.standbyDirection / (2 * VK2D_PI)) * game->assets.texVelocity->img->width) - 7, GAME_HEIGHT - HUD_OFFSET_Y - game->assets.texTheta->img->height);
+		uint32_t index = 0;
+		float x = (GAME_WIDTH / 2) - 32;
+		float y = GAME_HEIGHT - HUD_OFFSET_Y - 64;
+		if (pointInRectangle(game->input.mx, game->input.my, x, y, 64, 64)) {
+			if (game->input.lm)
+				index = 2;
+			else
+				index = 1;
+		}
+		vk2dDrawTexture(game->assets.texLaunchButton[index], x, y);
+
+		// Various metrics
+		drawFont(game->font, "CRASHED SATELLITES", GAME_WIDTH - HUD_OFFSET_X - (18 * 8), HUD_OFFSET_Y);
+		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (18 * 8), HUD_OFFSET_Y + 17, 18 * 8, 4);
+		vk2dRendererSetColourMod(RED);
+		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (18 * 8), HUD_OFFSET_Y + 17, (game->player.satellitesCrashed / GAME_OVER_SATELLITE_COUNT) * (18 * 8), 4);
+		vk2dRendererSetColourMod(DEFAULT_COLOUR);
 	} else {
 		vk2dDrawTexture(game->assets.texGameOver, 0, 0);
 		// TODO: Show high score and user score
@@ -345,7 +390,7 @@ void spacelink(int windowWidth, int windowHeight) {
 	volatile double lastTime = SDL_GetPerformanceCounter();
 
 	/******************** VK2D initialization ********************/
-	VK2DRendererConfig config = {msaa_16x, sm_TripleBuffer, ft_Nearest};
+	VK2DRendererConfig config = {msaa_32x, sm_TripleBuffer, ft_Nearest};
 	vk2dRendererInit(window, config);
 	VK2DTexture backbuffer = vk2dTextureCreate(vk2dRendererGetDevice(), GAME_WIDTH, GAME_HEIGHT);
 	vk2dRendererSetTextureCamera(true);
@@ -354,6 +399,17 @@ void spacelink(int windowWidth, int windowHeight) {
 	VK2DShader shaderPostFX = vk2dShaderCreate(vk2dRendererGetDevice(), SHADER_FX_VERTEX, SHADER_FX_FRAGMENT, sizeof(PostFX));
 	VK2DImage imgCursor = vk2dImageLoad(vk2dRendererGetDevice(), CURSOR_PNG);
 	VK2DImage imgGameOver = vk2dImageLoad(vk2dRendererGetDevice(), GAMEOVER_PNG);
+	VK2DImage imgTheta = vk2dImageLoad(vk2dRendererGetDevice(), THETA_PNG);
+	VK2DImage imgVelocity = vk2dImageLoad(vk2dRendererGetDevice(), VELOCITY_PNG);
+	VK2DImage imgPointer = vk2dImageLoad(vk2dRendererGetDevice(), POINTER_PNG);
+	VK2DImage imgLaunch = vk2dImageLoad(vk2dRendererGetDevice(), LAUNCH_PNG);
+	VK2DTexture texTheta = vk2dTextureLoad(imgTheta, 0, 0, 80, 24);
+	VK2DTexture texVelocity = vk2dTextureLoad(imgVelocity, 0, 0, 80, 24);
+	VK2DTexture texPointer = vk2dTextureLoad(imgPointer, 0, 0, 15, 9);
+	VK2DTexture texLaunch[3];
+	texLaunch[0] = vk2dTextureLoad(imgLaunch, 0, 0, 64, 64);
+	texLaunch[1] = vk2dTextureLoad(imgLaunch, 64, 0, 64, 64);
+	texLaunch[2] = vk2dTextureLoad(imgLaunch, 128, 0, 64, 64);
 	VK2DTexture texCursor = vk2dTextureLoad(imgCursor, 0, 0, 5, 5);
 	VK2DTexture texGameOver = vk2dTextureLoad(imgGameOver, 0, 0, 400, 400);
 	Font font = loadFont("assets/font.png", 8, 16, 0, 255);
@@ -364,6 +420,12 @@ void spacelink(int windowWidth, int windowHeight) {
 	game.font = font;
 	game.input.keys = SDL_GetKeyboardState(&keyCount);
 	game.assets.texGameOver = texGameOver;
+	game.assets.texLaunchButton[0] = texLaunch[0];
+	game.assets.texLaunchButton[1] = texLaunch[1];
+	game.assets.texLaunchButton[2] = texLaunch[2];
+	game.assets.texPointer = texPointer;
+	game.assets.texTheta = texTheta;
+	game.assets.texVelocity = texVelocity;
 	const uint32_t starCount = 50;
 	Star stars[starCount];
 	for (uint32_t i = 0; i < starCount; i++) {
@@ -462,6 +524,16 @@ void spacelink(int windowWidth, int windowHeight) {
 	vk2dImageFree(imgGameOver);
 	vk2dTextureFree(texCursor);
 	vk2dTextureFree(texGameOver);
+	vk2dTextureFree(texTheta);
+	vk2dImageFree(imgTheta);
+	vk2dTextureFree(texVelocity);
+	vk2dImageFree(imgVelocity);
+	vk2dTextureFree(texPointer);
+	vk2dImageFree(imgPointer);
+	vk2dTextureFree(texLaunch[0]);
+	vk2dTextureFree(texLaunch[1]);
+	vk2dTextureFree(texLaunch[2]);
+	vk2dImageFree(imgLaunch);
 	destroyFont(font);
 	vk2dRendererQuit();
 	SDL_DestroyWindow(window);

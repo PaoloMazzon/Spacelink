@@ -18,3 +18,4 @@ doxygen_sqlite3.db
 *.dll
 vk2derror.log
 Spacelink.exe
+Spacelink.cbp
