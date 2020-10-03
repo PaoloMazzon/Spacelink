@@ -7,9 +7,7 @@
 //     3. the longer you take to launch it the less money you make on the launch and money is ur score but a satellite down is hefty cost and 3 down = lose
 //
 // TODO:
-//   1. Collisions/fail state
 //   2. Decent menu (sound settings, plot, controls, logo)
-//   3. High scores
 //   4. Baller soundtrack and better graphics
 #define SDL_MAIN_HANDLED
 #include "VK2D/VK2D.h"
@@ -31,7 +29,7 @@ const int GAME_WIDTH = 400;
 const int GAME_HEIGHT = 400;
 const uint32_t FONT_RANGE = 255;
 const uint32_t DEFAULT_LIST_EXTENSION = 10;
-const Dosh MONEY_LOSS_PER_SECOND = 100;
+const Dosh MONEY_LOSS_PER_SECOND = 300;
 const Dosh MINIMUM_PAYOUT = 500;
 const float PLANET_MINIMUM_RADIUS = 30;
 const float PLANET_MAXIMUM_RADIUS = 50;
@@ -71,6 +69,7 @@ vec4 CYAN = {0, 1, 1, 1};
 vec4 PURPLE = {1, 0, 1, 1};
 vec4 YELLOW = {1, 1, 0, 1};
 vec4 STAR_COLOUR = {0.4, 0.4, 0.4, 1.0};
+vec4 SATELLITE_COLOUR = {0.7, 0.7, 0.7, 1};
 vec4 SPACE_BLUE = {0, 0, 0.02, 1};
 vec4 PLANET_COLOUR = {0.05, 0.11, 0.05, 1};
 vec4 DEFAULT_COLOUR = {1, 1, 1, 1};
@@ -104,6 +103,8 @@ typedef struct Satellite {
 	float radius;
 	float x, y;
 	Dosh cost;
+	vec4 colour;
+	float seed;
 } Satellite;
 
 // Distant small star
@@ -270,6 +271,7 @@ Satellite genRandomSatellite(Planet *planet) {
 	Satellite sat = {};
 	sat.radius = MINIMUM_SATELLITE_RADIUS + ((float)rand() / RAND_MAX) * (MAXIMUM_SATELLITE_RADIUS - MINIMUM_SATELLITE_RADIUS);
 	sat.cost = (MINIMUM_SATELLITE_DOSH + ((float)rand() / RAND_MAX) * (MAXIMUM_SATELLITE_DOSH - MINIMUM_SATELLITE_DOSH)) + (sat.radius * SATELLITE_RADIAL_BONUS);
+	sat.seed = rand();
 	return sat;
 }
 
@@ -293,7 +295,12 @@ void loadStandby(Game *game) {
 }
 
 void drawSatellite(float x, float y, bool drawAtSpecified, Satellite *sat) {
-	vk2dRendererSetColourMod(YELLOW);
+	sat->seed++;
+	sat->colour[0] = 0.6 + ((sinf(sat->seed / 30) * 0.4));
+	sat->colour[1] = 0.6 + ((sinf(sat->seed / 30) * 0.4));
+	sat->colour[2] = 0;
+	sat->colour[3] = 1;
+	vk2dRendererSetColourMod(sat->colour);
 	if (drawAtSpecified)
 		vk2dRendererDrawCircle(x, y, sat->radius);
 	else
@@ -365,7 +372,7 @@ void setupGame(Game *game) {
 	game->player.standbyVelocity = MINIMUM_SATELLITE_VELOCITY;
 	game->player.standbyDirection = MINIMUM_SATELLITE_ANGLE + (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE) / 2;
 	game->playing = true;
-	game->standbyCooldown = STANDBY_COOLDOWN * 60;
+	game->standbyCooldown = STANDBY_COOLDOWN * 2 * 60;
 }
 
 Status updateGame(Game *game) {
