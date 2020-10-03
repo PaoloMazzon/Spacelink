@@ -28,13 +28,13 @@ const uint32_t DEFAULT_LIST_EXTENSION = 10;
 const Dosh MONEY_LOSS_PER_SECOND = 100;
 const Dosh MINIMUM_PAYOUT = 500;
 const float PLANET_MINIMUM_RADIUS = 30;
-const float PLANET_MAXIMUM_RADIUS = 80;
-const float PLANET_MINIMUM_GRAVITY = 6;
-const float PLANET_MAXIMUM_GRAVITY = 12;
+const float PLANET_MAXIMUM_RADIUS = 50;
+const float PLANET_MINIMUM_GRAVITY = 0.05;
+const float PLANET_MAXIMUM_GRAVITY = 0.15;
 const int GAME_OVER_SATELLITE_COUNT = 3; // How many satellites must crash before game over
 const float STANDBY_COOLDOWN = 3; // In seconds
-const float MAXIMUM_SATELLITE_VELOCITY = 10;
-const float MINIMUM_SATELLITE_VELOCITY = 1;
+const float MAXIMUM_SATELLITE_VELOCITY = 5;
+const float MINIMUM_SATELLITE_VELOCITY = 3;
 const float MAXIMUM_SATELLITE_RADIUS = 4;
 const float MINIMUM_SATELLITE_RADIUS = 1;
 const float MAXIMUM_SATELLITE_DOSH = 4000;
@@ -264,7 +264,16 @@ void removeSatellite(Game *game, uint32_t index) {
 
 // This will delete itself and any satellites it hits on a collision as well as update score and all that
 void updateSatellite(Game *game, uint32_t index) {
-	// TODO: This
+	Satellite *sat = &game->satellites[index];
+	sat->x += cosf(sat->direction) * (sat->velocity);
+	sat->y += sinf(sat->direction) * (sat->velocity);
+	// We have to add its current velocity vector to the vector of of planets gravity / 60 (its per second so must adjust it to be per frame)
+	float angle = pointAngle(sat->x, sat->y, GAME_WIDTH / 2, GAME_HEIGHT / 2);
+	float v3x = (cosf(sat->direction) * sat->velocity) + (cosf(angle) * (game->planet.gravity));// / 60));
+	float v3y = (sinf(sat->direction) * sat->velocity) + (sinf(angle) * (game->planet.gravity));// / 60));
+	sat->velocity = sqrtf(powf(v3x, 2) + powf(v3y, 2));
+	sat->direction = atan2f(v3y, v3x);
+	// TODO: Collisions
 }
 
 /****************** Game functions ******************/
@@ -407,6 +416,7 @@ Status updateMenu(Game *game) {
 }
 
 void drawMenu(Game *game) {
+	// TODO: A decent menu
 	drawFont(game->font, "Press <SPACE> to play", 0, 0);
 	drawFont(game->font, "Press <ESC> to quit", 0, 16);
 }
