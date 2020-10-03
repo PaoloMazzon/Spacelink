@@ -25,6 +25,24 @@ const int GAME_WIDTH = 400;
 const int GAME_HEIGHT = 400;
 const uint32_t FONT_RANGE = 255;
 const uint32_t DEFAULT_LIST_EXTENSION = 10;
+const Dosh MONEY_LOSS_PER_SECOND = 100;
+const Dosh MINIMUM_PAYOUT = 500;
+const float PLANET_MINIMUM_RADIUS = 50;
+const float PLANET_MAXIMUM_RADIUS = 150;
+const float PLANET_MINIMUM_GRAVITY = 6;
+const float PLANET_MAXIMUM_GRAVITY = 12;
+const int GAME_OVER_SATELLITE_COUNT = 3; // How many satellites must crash before game over
+const float STANDBY_COOLDOWN = 3; // In seconds
+const float MAXIMUM_SATELLITE_VELOCITY = 10;
+const float MINIMUM_SATELLITE_VELOCITY = 1;
+const float MAXIMUM_SATELLITE_RADIUS = 4;
+const float MINIMUM_SATELLITE_RADIUS = 1;
+const float MAXIMUM_SATELLITE_DOSH = 2000;
+const float MINIMUM_SATELLITE_DOSH = 750;
+const float SATELLITE_RADIAL_BONUS = 100; // Bonus dosh per radius of a satellite since bigger == more difficult
+const float LAUNCH_DISTANCE = 10; // Distance from the planet satellites are launched from
+const float HUD_OFFSET_X = 2;
+const float HUD_OFFSET_Y = 2;
 vec4 BLACK = {0, 0, 0, 1};
 vec4 WHITE = {1, 1, 1, 1};
 vec4 BLUE = {0, 0, 1, 1};
@@ -33,13 +51,16 @@ vec4 GREEN = {0, 1, 0, 1};
 vec4 CYAN = {0, 1, 1, 1};
 vec4 PURPLE = {1, 0, 1, 1};
 vec4 YELLOW = {1, 1, 0, 1};
+vec4 STAR_COLOUR = {0.4, 0.4, 0.4, 1.0};
 vec4 SPACE_BLUE = {0, 0, 0.02, 1};
+vec4 PLANET_COLOUR = {0.05, 0.11, 0.05, 1};
 vec4 DEFAULT_COLOUR = {1, 1, 1, 1};
 
 /******************** Assets ********************/
 const char *CURSOR_PNG = "assets/cursor.png";
 const char *SHADER_FX_VERTEX = "assets/vert.spv";
 const char *SHADER_FX_FRAGMENT = "assets/frag.spv";
+const char *GAMEOVER_PNG = "assets/gameover.png";
 
 /******************** Structs ********************/
 // UBO for the post-fx shader
@@ -53,6 +74,7 @@ typedef struct Satellite {
 	float velocity;
 	float direction;
 	float radius;
+	float x, y;
 	Dosh cost;
 } Satellite;
 
@@ -91,16 +113,26 @@ typedef struct Input {
 	float mx, my;
 } Input;
 
+// Collection of needed assets
+typedef struct Assets {
+	VK2DTexture texGameOver;
+} Assets;
+
 // Big boy struct holding info for basically everything
 typedef struct Game {
 	Input input;
+	Assets assets;
 	PostFX ubo;
 	Font font;
 	Player player;
 	Planet planet;
+	bool playing; // False if player has already lost
 	Satellite *satellites;
 	uint32_t listSize;
 	uint32_t numSatellites;
+	Dosh line; // Money on the line for current project
+	Satellite standby; // satellite waiting to be launched
+	float standbyCooldown; // This is in frames
 } Game;
 
 /******************** Helper functions ********************/
@@ -147,14 +179,14 @@ Font loadFont(const char *filename, uint32_t width, uint32_t height, uint32_t st
 void drawFont(Font font, const char *string, float x, float y) {
 	float i = 0;
 	while (*string != 0)
-		vk2dDrawTexture(font.characters[*(string++)], x + (i++ * font.w), y);
+		vk2dDrawTexture(font.characters[(uint32_t)(*(string++))], x + (i++ * font.w), y);
 }
 
 // Same as above but with numbers at the end of the string
 void drawFontNumber(Font font, const char *string, float num, float x, float y) {
 	drawFont(font, string, x, y);
 	char numbers[30];
-	sprintf(numbers, "%f", num);
+	sprintf(numbers, "%.2f", num);
 	drawFont(font, numbers, x + ((float)strlen(string) * font.w), y);
 }
 
@@ -166,16 +198,126 @@ void destroyFont(Font font) {
 	vk2dImageFree(font.sheet);
 }
 
-void setupGame(Game *game) {
+/****************** Functions helpful to the game ******************/
+Planet genRandomPlanet() {
+	Planet planet = {};
+	planet.radius = PLANET_MINIMUM_RADIUS + ((float)rand() / RAND_MAX) * (PLANET_MAXIMUM_RADIUS - PLANET_MINIMUM_RADIUS);
+	planet.gravity = PLANET_MINIMUM_GRAVITY + ((float)rand() / RAND_MAX) * (PLANET_MAXIMUM_GRAVITY - PLANET_MINIMUM_GRAVITY);
+	return planet;
+}
 
+// Satellites launch from the right side
+Satellite genRandomSatellite(Planet *planet) {
+	Satellite sat = {};
+	sat.radius = MINIMUM_SATELLITE_RADIUS + ((float)rand() / RAND_MAX) * (MAXIMUM_SATELLITE_RADIUS - MINIMUM_SATELLITE_RADIUS);
+	sat.cost = (MINIMUM_SATELLITE_DOSH + ((float)rand() / RAND_MAX) * (MAXIMUM_SATELLITE_DOSH - MINIMUM_SATELLITE_DOSH)) + (sat.radius * SATELLITE_RADIAL_BONUS);
+	sat.x = (GAME_WIDTH / 2) + planet->radius + LAUNCH_DISTANCE;
+	sat.y = (GAME_HEIGHT / 2) + planet->radius + LAUNCH_DISTANCE;
+	return sat;
+}
+
+void extendSatelliteList(Game *game) {
+	game->satellites = realloc(game->satellites, sizeof(Satellite) * (game->listSize + DEFAULT_LIST_EXTENSION));
+	game->listSize += DEFAULT_LIST_EXTENSION;
+}
+
+// Places the standby satellite into the sat list wherever it can
+void loadStandby(Game *game, float velocity, float direction) {
+	if (game->numSatellites == game->listSize)
+		extendSatelliteList(game);
+	game->standby.velocity = velocity;
+	game->standby.direction = direction;
+	game->satellites[game->numSatellites] = game->standby;
+	game->standbyCooldown = STANDBY_COOLDOWN;
+	game->numSatellites++;
+}
+
+void drawSatellite(float x, float y, bool drawAtSpecified, Satellite *sat) {
+	vk2dRendererSetColourMod(BLACK);
+	if (drawAtSpecified)
+		vk2dRendererDrawCircle(x, y, sat->radius);
+	else
+		vk2dRendererDrawCircle(sat->x, sat->y, sat->radius);
+	vk2dRendererSetColourMod(DEFAULT_COLOUR);
+}
+
+void removeSatellite(Game *game, uint32_t index) {
+	uint32_t i;
+	for (i = index; i < game->numSatellites - 1; i++)
+		game->satellites[i] = game->satellites[i + 1];
+	game->numSatellites--;
+}
+
+// This will delete itself and any satellites it hits on a collision as well as update score and all that
+void updateSatellite(Game *game, uint32_t index) {
+	// TODO: This
+}
+
+/****************** Game functions ******************/
+void unloadGame(Game *game) {
+	free(game->satellites);
+	game->satellites = NULL;
+	game->numSatellites = 0;
+	game->listSize = 0;
+	game->ubo.trip = 0;
+}
+
+void setupGame(Game *game) {
+	unloadGame(game);
+	game->numSatellites = 0;
+	game->planet = genRandomPlanet();
+	game->player.satellitesCrashed = 0;
+	game->player.score = 0;
+	game->line = 0;
+	game->playing = true;
+	game->standbyCooldown = STANDBY_COOLDOWN * 60;
 }
 
 Status updateGame(Game *game) {
+	/* Game algorithm
+	 * A) Game
+	 *   1. move satellites around
+	 *   2. process satellite deaths
+	 *   3. lose money if satellite is ready
+	 *   4. launch satellite if player wants/wait on cool down
+	 *   5. lose if 3 crashes
+	 * B) Lose state
+	 *   1. Wait for button to restart/quit
+	 */
+
+	if (game->playing) {
+		// TODO: This
+	}
+
+	if (game->input.keys[SDL_SCANCODE_RETURN])
+		return Status_Menu;
+	else if (game->input.keys[SDL_SCANCODE_R])
+		return Status_Restart;
 	return Status_Game;
 }
 
 void drawGame(Game *game) {
+	if (game->playing) {
+		// Draw planet
+		vk2dRendererSetColourMod(PLANET_COLOUR);
+		vk2dDrawCircle(GAME_WIDTH / 2, GAME_HEIGHT / 2, game->planet.radius);
+		vk2dRendererSetColourMod(DEFAULT_COLOUR);
 
+		// Draw all satellites
+		for (uint32_t i = 0; i < game->numSatellites; i++)
+			drawSatellite(0, 0, false, &game->satellites[i]);
+
+		// Draw the HUD
+		if (game->standbyCooldown == 0) {
+			drawFont(game->font, "STANDBY", HUD_OFFSET_X, HUD_OFFSET_Y);
+			drawSatellite(HUD_OFFSET_X + 16, HUD_OFFSET_Y + 20, true, &game->standby);
+		} else {
+			drawFontNumber(game->font, "COOLDOWN: ", (game->standbyCooldown / 60), HUD_OFFSET_X, HUD_OFFSET_Y);
+		}
+	} else {
+		vk2dDrawTexture(game->assets.texGameOver, 0, 0);
+		// TODO: Show high score and user score
+	}
 }
 
 Status updateMenu(Game *game) {
@@ -203,7 +345,7 @@ void spacelink(int windowWidth, int windowHeight) {
 	volatile double lastTime = SDL_GetPerformanceCounter();
 
 	/******************** VK2D initialization ********************/
-	VK2DRendererConfig config = {msaa_1x, sm_TripleBuffer, ft_Nearest};
+	VK2DRendererConfig config = {msaa_16x, sm_TripleBuffer, ft_Nearest};
 	vk2dRendererInit(window, config);
 	VK2DTexture backbuffer = vk2dTextureCreate(vk2dRendererGetDevice(), GAME_WIDTH, GAME_HEIGHT);
 	vk2dRendererSetTextureCamera(true);
@@ -211,7 +353,9 @@ void spacelink(int windowWidth, int windowHeight) {
 	/******************** Asset loading ********************/
 	VK2DShader shaderPostFX = vk2dShaderCreate(vk2dRendererGetDevice(), SHADER_FX_VERTEX, SHADER_FX_FRAGMENT, sizeof(PostFX));
 	VK2DImage imgCursor = vk2dImageLoad(vk2dRendererGetDevice(), CURSOR_PNG);
+	VK2DImage imgGameOver = vk2dImageLoad(vk2dRendererGetDevice(), GAMEOVER_PNG);
 	VK2DTexture texCursor = vk2dTextureLoad(imgCursor, 0, 0, 5, 5);
+	VK2DTexture texGameOver = vk2dTextureLoad(imgGameOver, 0, 0, 400, 400);
 	Font font = loadFont("assets/font.png", 8, 16, 0, 255);
 
 	/******************** Game variables ********************/
@@ -219,6 +363,7 @@ void spacelink(int windowWidth, int windowHeight) {
 	Game game = {};
 	game.font = font;
 	game.input.keys = SDL_GetKeyboardState(&keyCount);
+	game.assets.texGameOver = texGameOver;
 	const uint32_t starCount = 50;
 	Star stars[starCount];
 	for (uint32_t i = 0; i < starCount; i++) {
@@ -237,7 +382,6 @@ void spacelink(int windowWidth, int windowHeight) {
 		SDL_PumpEvents();
 		int mx, my;
 		float xmouse, ymouse;
-		bool leftClick, rightClick, middleClick;
 		uint32_t mState = SDL_GetMouseState(&mx, &my);
 		game.input.plm = game.input.lm;
 		game.input.pmm = game.input.mm;
@@ -254,18 +398,23 @@ void spacelink(int windowWidth, int windowHeight) {
 		Status status;
 		if (state == GameState_Menu) {
 			status = updateMenu(&game);
-			if (status == Status_Game)
+			if (status == Status_Game) {
 				state = GameState_Game;
-			else if (status == Status_Quit)
+				setupGame(&game);
+			} else if (status == Status_Quit) {
 				running = false;
+			}
 		} else if (state == GameState_Game) {
 			status = updateGame(&game);
-			if (status == Status_Menu)
+			if (status == Status_Menu) {
 				state = GameState_Menu;
-			else if (status == Status_Quit)
+				unloadGame(&game);
+			} else if (status == Status_Quit) {
 				running = false;
-			else if (status == Status_Restart)
+				unloadGame(&game);
+			} else if (status == Status_Restart) {
 				setupGame(&game);
+			}
 		}
 
 		/******************** Begin drawing ********************/
@@ -281,8 +430,10 @@ void spacelink(int windowWidth, int windowHeight) {
 
 		/******************** Gameplay drawing ********************/
 		// Starry background
+		vk2dRendererSetColourMod(STAR_COLOUR);
 		for (uint32_t i = 0; i < starCount; i++)
 			vk2dDrawCircle(stars[i].x, stars[i].y, stars[i].radius);
+		vk2dRendererSetColourMod(DEFAULT_COLOUR);
 		if (state == GameState_Menu)
 			drawMenu(&game);
 		else if (state == GameState_Game)
@@ -308,7 +459,9 @@ void spacelink(int windowWidth, int windowHeight) {
 	vk2dShaderFree(shaderPostFX);
 	vk2dTextureFree(backbuffer);
 	vk2dImageFree(imgCursor);
+	vk2dImageFree(imgGameOver);
 	vk2dTextureFree(texCursor);
+	vk2dTextureFree(texGameOver);
 	destroyFont(font);
 	vk2dRendererQuit();
 	SDL_DestroyWindow(window);
