@@ -17,4 +17,4 @@ file(GLOB VK2D_FILES Vulkan2D/VK2D/*.c)
 # is just for testing purposes.
 include_directories(./include ${SDL2_INCLUDE_DIR} ${Vulkan_INCLUDE_DIRS} ./Vulkan2D)
 add_executable(${PROJECT_NAME} main.c ${C_FILES} ${H_FILES} ${VK2D_FILES})
-target_link_libraries(${PROJECT_NAME} m ${SDL2_LIBRARIES} ${Vulkan_LIBRARIES})
+target_link_libraries(${PROJECT_NAME} m dsound ${SDL2_LIBRARIES} ${Vulkan_LIBRARIES})

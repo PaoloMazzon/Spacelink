@@ -8,13 +8,17 @@
 //
 // TODO:
 //   1. Indication of upcoming satellite with like name/portrait of company
-//   2. Decent menu (sound settings, plot, controls, logo)
-//   3. Baller soundtrack and better graphics
+//   2. Audio
+//   3. Intro screen
+//   4. Baller soundtrack and better graphics
 #define SDL_MAIN_HANDLED
+#define CUTE_SOUND_IMPLEMENTATION
 #include "VK2D/VK2D.h"
 #include "VK2D/Image.h"
 #include <SDL2/SDL.h>
 #include <stdio.h>
+#include "cute_sound.h"
+#include <SDL2/SDL_syswm.h>
 #include <math.h>
 #include <malloc.h>
 
@@ -50,7 +54,7 @@ const float SATELLITE_RADIAL_BONUS = 500; // Bonus dosh per radius of a satellit
 const float LAUNCH_DISTANCE = 20; // Distance from the planet satellites are launched from
 const float HUD_OFFSET_X = 8;
 const float HUD_OFFSET_Y = 8;
-const float HUD_BUTTON_WEIGHT = 0.05; // How slow hud buttons move
+const float HUD_BUTTON_WEIGHT = 0.02; // How slow hud buttons move
 const float VELOCITY_VARIANCE = (MAXIMUM_SATELLITE_VELOCITY - MINIMUM_SATELLITE_VELOCITY) * 0.05;
 const float THETA_VARIANCE = (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE) * 0.05;
 const float SLIDER_W = 160;
@@ -91,6 +95,13 @@ const char *SCORE_FILE = "NotTheHighScore.nothighscore";
 const char *MENU_PNG = "assets/menu.png";
 const char *PLANET_PNG = "assets/planet.png";
 const char *INTRO_PNG = "assets/intro.png";
+const char *LIFTOFF_WAV = "assets/liftoff.wav";
+const char *PLAYING_WAV = "assets/playing.wav";
+const char *MENU_WAV = "assets/menu.wav";
+const char *CRASH_WAV = "assets/crash.wav";
+const char *PEOPLE_PNG = "assets/people.png";
+const char *HATS_PNG = "assets/hats.png";
+const char *ALIEN_PNG = "assets/alien.png";
 
 /******************** Structs ********************/
 // UBO for the post-fx shader
@@ -108,6 +119,7 @@ typedef struct Satellite {
 	Dosh cost;
 	vec4 colour;
 	float seed;
+	bool stolen; // In case an alien is currently stealing it
 } Satellite;
 
 // Distant small star
@@ -158,10 +170,19 @@ typedef struct Assets {
 	VK2DTexture texPlanet;
 	VK2DTexture texMenu;
 	VK2DTexture texIntro;
+	VK2DTexture texHats[4];
+	VK2DTexture texPeople[4];
+	VK2DTexture texAlien;
+	cs_loaded_sound_t *sndCrash;
+	cs_loaded_sound_t *sndLiftoff;
+	cs_loaded_sound_t *sndPlaying;
+	cs_loaded_sound_t *sndMenu;
 } Assets;
 
 // Big boy struct holding info for basically everything
 typedef struct Game {
+	cs_context_t *cuteSound;
+	cs_play_sound_def_t def;
 	Input input;
 	Assets assets;
 	PostFX ubo;
@@ -178,6 +199,8 @@ typedef struct Game {
 	bool clickTheta, clickVelocity;
 	Dosh highscore;
 	float shakeDuration;
+	uint32_t selectedHat; // For the portrait at the bottom
+	uint32_t selectedPerson;
 } Game;
 
 /******************** Helper functions ********************/
@@ -256,6 +279,12 @@ void destroyFont(Font font) {
 }
 
 /****************** Functions helpful to the game ******************/
+void playSound(Game *game, cs_loaded_sound_t *sound, bool looping) {
+	game->def = cs_make_def(sound);
+	game->def.looped = looping;
+	cs_play_sound(game->cuteSound, game->def);
+}
+
 void logHighScore(Game *game) {
 	game->highscore = game->highscore < game->player.score ? game->player.score : game->highscore;
 	FILE *hs = fopen(SCORE_FILE, "w");
@@ -295,6 +324,7 @@ void loadStandby(Game *game) {
 	game->player.score += game->standby.cost;
 	game->satellites[game->numSatellites] = game->standby;
 	game->standbyCooldown = STANDBY_COOLDOWN;
+	playSound(game, game->assets.sndLiftoff, false);
 	game->numSatellites++;
 }
 
@@ -340,6 +370,7 @@ void updateSatellite(Game *game, uint32_t index) {
 	if (absf(pointDistance(sat->x, sat->y, GAME_WIDTH / 2, GAME_HEIGHT / 2)) < game->planet.radius) { // planet collisions are a bit forgiving b/c doesn't factor in sat radius
 		satelliteCrashEffects(game, sat->x, sat->y);
 		removeSatellite(game, index);
+		playSound(game, game->assets.sndCrash, false);
 	} else {
 		bool dead = false;
 		for (uint32_t i = 0; i < game->numSatellites && !dead; i++) {
@@ -351,6 +382,7 @@ void updateSatellite(Game *game, uint32_t index) {
 					removeSatellite(game, i - 1);
 				else
 					removeSatellite(game, i);
+				playSound(game, game->assets.sndCrash, false);
 			}
 		}
 	}
@@ -425,6 +457,8 @@ Status updateGame(Game *game) {
 		loadStandby(game);
 		game->standbyCooldown = STANDBY_COOLDOWN * 60;
 		game->standby = genRandomSatellite(&game->planet);
+		game->selectedPerson = rand() % 4;
+		game->selectedHat = rand() % 4;
 	} else {
 		game->standby.cost -= MONEY_LOSS_PER_SECOND / 60;
 		game->standby.cost = game->standby.cost < MINIMUM_PAYOUT ? MINIMUM_PAYOUT : game->standby.cost;
@@ -492,6 +526,15 @@ void drawGame(Game *game) {
 		sprintf(score, "Dosh: %.2f$", game->player.score);
 		float w = 8 * strlen(score);
 		drawFont(game->font, score, GAME_WIDTH - HUD_OFFSET_X - w, GAME_HEIGHT - 16 - HUD_OFFSET_Y);
+
+		// Portrait
+		if (game->standbyCooldown <= 0) {
+			vk2dDrawTexture(game->assets.texPeople[game->selectedPerson], GAME_WIDTH - HUD_OFFSET_X - 64, GAME_HEIGHT - HUD_OFFSET_Y - 96 - (18 * 2));
+			vk2dDrawTexture(game->assets.texHats[game->selectedHat], GAME_WIDTH - HUD_OFFSET_X - 64 + 5, GAME_HEIGHT - HUD_OFFSET_Y - 96 - (18 * 2) - 20);
+			sprintf(score, "Sat Mass: %ikg", (int)round(game->standby.radius * 1000));
+			w = 8 * strlen(score);
+			drawFont(game->font, score, GAME_WIDTH - HUD_OFFSET_X - w, GAME_HEIGHT - 18 - 16 - HUD_OFFSET_Y);
+		}
 	} else {
 		vk2dDrawTexture(game->assets.texGameOver, 0, 0);
 		char score[50];
@@ -535,6 +578,11 @@ void spacelink(int windowWidth, int windowHeight) {
 	vk2dRendererSetTextureCamera(true);
 
 	/******************** Asset loading ********************/
+	SDL_SysWMinfo wmInfo;
+	SDL_VERSION(&wmInfo.version);
+	SDL_GetWindowWMInfo(window, &wmInfo);
+	HWND hwnd = wmInfo.info.win.window;
+	cs_context_t *ctx = cs_make_context(hwnd, 41000, 1024 * 1024 * 10, 20, NULL);
 	VK2DShader shaderPostFX = vk2dShaderCreate(vk2dRendererGetDevice(), SHADER_FX_VERTEX, SHADER_FX_FRAGMENT, sizeof(PostFX));
 	VK2DImage imgCursor = vk2dImageLoad(vk2dRendererGetDevice(), CURSOR_PNG);
 	VK2DImage imgGameOver = vk2dImageLoad(vk2dRendererGetDevice(), GAMEOVER_PNG);
@@ -546,9 +594,23 @@ void spacelink(int windowWidth, int windowHeight) {
 	VK2DImage imgIntro = vk2dImageLoad(vk2dRendererGetDevice(), INTRO_PNG);
 	VK2DImage imgPlanet = vk2dImageLoad(vk2dRendererGetDevice(), PLANET_PNG);
 	VK2DImage imgMenu = vk2dImageLoad(vk2dRendererGetDevice(), MENU_PNG);
+	VK2DImage imgHats = vk2dImageLoad(vk2dRendererGetDevice(), HATS_PNG);
+	VK2DImage imgPeople = vk2dImageLoad(vk2dRendererGetDevice(), PEOPLE_PNG);
+	VK2DImage imgAlien = vk2dImageLoad(vk2dRendererGetDevice(), ALIEN_PNG);
 	VK2DTexture texTheta = vk2dTextureLoad(imgTheta, 0, 0, SLIDER_W, SLIDER_H);
 	VK2DTexture texVelocity = vk2dTextureLoad(imgVelocity, 0, 0, SLIDER_W, SLIDER_H);
 	VK2DTexture texPointer = vk2dTextureLoad(imgPointer, 0, 0, 15, 9);
+	VK2DTexture texAlien = vk2dTextureLoad(imgAlien, 0, 0, 32, 16);
+	VK2DTexture texPeople[4];
+	VK2DTexture texHats[4];
+	texPeople[0] = vk2dTextureLoad(imgPeople, 0, 0, 64, 96);
+	texPeople[1] = vk2dTextureLoad(imgPeople, 64, 0, 64, 96);
+	texPeople[2] = vk2dTextureLoad(imgPeople, 128, 0, 64, 96);
+	texPeople[3] = vk2dTextureLoad(imgPeople, 192, 0, 64, 96);
+	texHats[0] = vk2dTextureLoad(imgHats, 0, 0, 48, 32);
+	texHats[1] = vk2dTextureLoad(imgHats, 48, 0, 48, 32);
+	texHats[2] = vk2dTextureLoad(imgHats, 96, 0, 48, 32);
+	texHats[3] = vk2dTextureLoad(imgHats, 144, 0, 48, 32);
 	VK2DTexture texCannon = vk2dTextureLoad(imgCannon, 0, 0, 23, 13);
 	VK2DTexture texIntro = vk2dTextureLoad(imgIntro, 0, 0, 400, 400);
 	VK2DTexture texPlanet = vk2dTextureLoad(imgPlanet, 0, 0, 100, 100);
@@ -560,6 +622,10 @@ void spacelink(int windowWidth, int windowHeight) {
 	VK2DTexture texCursor = vk2dTextureLoad(imgCursor, 0, 0, 5, 5);
 	VK2DTexture texGameOver = vk2dTextureLoad(imgGameOver, 0, 0, 400, 400);
 	Font font = loadFont("assets/font.png", 8, 16, 0, 255);
+	cs_loaded_sound_t sndLiftoff = cs_load_wav(LIFTOFF_WAV);
+	cs_loaded_sound_t sndPlaying = cs_load_wav(PLAYING_WAV);
+	cs_loaded_sound_t sndMenu = cs_load_wav(MENU_WAV);
+	cs_loaded_sound_t sndCrash = cs_load_wav(CRASH_WAV);
 
 	/******************** Game variables ********************/
 	GameState state = GameState_Menu;
@@ -570,6 +636,15 @@ void spacelink(int windowWidth, int windowHeight) {
 	game.assets.texLaunchButton[0] = texLaunch[0];
 	game.assets.texLaunchButton[1] = texLaunch[1];
 	game.assets.texLaunchButton[2] = texLaunch[2];
+	game.assets.texPeople[0] = texPeople[0];
+	game.assets.texPeople[1] = texPeople[1];
+	game.assets.texPeople[2] = texPeople[2];
+	game.assets.texPeople[3] = texPeople[3];
+	game.assets.texHats[0] = texHats[0];
+	game.assets.texHats[1] = texHats[1];
+	game.assets.texHats[2] = texHats[2];
+	game.assets.texHats[3] = texHats[3];
+	game.assets.texAlien = texAlien;
 	game.assets.texPointer = texPointer;
 	game.assets.texTheta = texTheta;
 	game.assets.texVelocity = texVelocity;
@@ -577,11 +652,20 @@ void spacelink(int windowWidth, int windowHeight) {
 	game.assets.texIntro = texIntro;
 	game.assets.texPlanet = texPlanet;
 	game.assets.texMenu = texMenu;
+	game.cuteSound = ctx;
+	game.assets.sndLiftoff = &sndLiftoff;
+	game.assets.sndPlaying = &sndPlaying;
+	game.assets.sndMenu = &sndMenu;
+	game.assets.sndCrash = &sndCrash;
 
 	// Load highscore
 	FILE *hs = fopen(SCORE_FILE, "r");
 	fscanf(hs, "%lf", &game.highscore);
 	fclose(hs);
+
+	// Start the menu music
+	cs_stop_all_sounds(ctx);
+	playSound(&game, &sndMenu, true);
 
 	const uint32_t starCount = 50;
 	Star stars[starCount];
@@ -596,6 +680,7 @@ void spacelink(int windowWidth, int windowHeight) {
 			if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_CLOSE)
 				running = false;
 		VK2DCamera cam = vk2dRendererGetCamera();
+		cs_mix(ctx);
 
 		/******************** Manage SDL input ********************/
 		SDL_PumpEvents();
@@ -620,6 +705,8 @@ void spacelink(int windowWidth, int windowHeight) {
 			if (status == Status_Game) {
 				state = GameState_Game;
 				setupGame(&game);
+				cs_stop_all_sounds(ctx);
+				playSound(&game, &sndPlaying, true);
 			} else if (status == Status_Quit) {
 				running = false;
 			}
@@ -631,6 +718,8 @@ void spacelink(int windowWidth, int windowHeight) {
 			} else if (status == Status_Quit) {
 				running = false;
 				unloadGame(&game);
+				cs_stop_all_sounds(ctx);
+				playSound(&game, &sndMenu, true);
 			} else if (status == Status_Restart) {
 				setupGame(&game);
 			}
@@ -694,6 +783,18 @@ void spacelink(int windowWidth, int windowHeight) {
 	vk2dTextureFree(texCursor);
 	vk2dTextureFree(texGameOver);
 	vk2dTextureFree(texTheta);
+	vk2dTextureFree(texPeople[0]);
+	vk2dTextureFree(texPeople[1]);
+	vk2dTextureFree(texPeople[2]);
+	vk2dTextureFree(texPeople[3]);
+	vk2dTextureFree(texHats[0]);
+	vk2dTextureFree(texHats[1]);
+	vk2dTextureFree(texHats[2]);
+	vk2dTextureFree(texHats[3]);
+	vk2dImageFree(imgHats);
+	vk2dImageFree(imgPeople);
+	vk2dTextureFree(texAlien);
+	vk2dImageFree(imgAlien);
 	vk2dTextureFree(texCannon);
 	vk2dTextureFree(texIntro);
 	vk2dImageFree(imgIntro);
@@ -712,6 +813,11 @@ void spacelink(int windowWidth, int windowHeight) {
 	vk2dTextureFree(texLaunch[2]);
 	vk2dImageFree(imgLaunch);
 	destroyFont(font);
+	cs_free_sound(&sndLiftoff);
+	cs_free_sound(&sndPlaying);
+	cs_free_sound(&sndMenu);
+	cs_free_sound(&sndCrash);
+	cs_release_context(ctx);
 	vk2dRendererQuit();
 	SDL_DestroyWindow(window);
 }
