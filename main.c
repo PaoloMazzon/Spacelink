@@ -852,7 +852,7 @@ void spacelink(int windowWidth, int windowHeight) {
 	Font font = loadFont("assets/font.png", 8, 16, 0, 255);
 	cs_loaded_sound_t sndLiftoff = cs_load_wav(LIFTOFF_WAV);
 	//cs_loaded_sound_t sndPlaying = cs_load_wav(PLAYING_WAV);
-	//cs_loaded_sound_t sndMenu = cs_load_wav(MENU_WAV);
+	cs_loaded_sound_t sndMenu = cs_load_wav(MENU_WAV);
 	cs_loaded_sound_t sndCrash = cs_load_wav(CRASH_WAV);
 	VK2DImage imgTutorial = vk2dImageLoad(vk2dRendererGetDevice(), TUTORIAL_PNG);
 	VK2DTexture texTutorial = vk2dTextureLoad(imgTutorial, 0, 0, 400, 400);
@@ -900,7 +900,7 @@ void spacelink(int windowWidth, int windowHeight) {
 
 	// Start the menu music
 	cs_stop_all_sounds(ctx);
-	//playSound(&game, &sndMenu, true);
+	playSound(&game, &sndMenu, true);
 
 	const uint32_t starCount = 50;
 	Star stars[starCount];
@@ -910,6 +910,7 @@ void spacelink(int windowWidth, int windowHeight) {
 		stars[i].radius = ceil(((real)rand() / RAND_MAX) * 3);
 	}
 
+	cs_spawn_mix_thread(ctx);
 	bool first = true;
 	while (running) {
 		//memcpy((void*)game.input.lastKeys, game.input.keys, keyCount);
@@ -918,7 +919,7 @@ void spacelink(int windowWidth, int windowHeight) {
 				running = false;
 		}
 		VK2DCamera cam = vk2dRendererGetCamera();
-		cs_mix(ctx);
+		//cs_mix(ctx);
 
 		/******************** Manage SDL input ********************/
 		SDL_PumpEvents();
@@ -943,7 +944,7 @@ void spacelink(int windowWidth, int windowHeight) {
 			if (status == Status_Game) {
 				state = GameState_Game;
 				setupGame(&game);
-				cs_stop_all_sounds(ctx);
+				//cs_stop_all_sounds(ctx);
 				//playSound(&game, &sndPlaying, true);
 			} else if (status == Status_Quit) {
 				running = false;
@@ -956,7 +957,7 @@ void spacelink(int windowWidth, int windowHeight) {
 			} else if (status == Status_Quit) {
 				running = false;
 				unloadGame(&game);
-				cs_stop_all_sounds(ctx);
+				//cs_stop_all_sounds(ctx);
 				//playSound(&game, &sndMenu, true);
 			} else if (status == Status_Restart) {
 				setupGame(&game);
@@ -1073,9 +1074,9 @@ void spacelink(int windowWidth, int windowHeight) {
 	destroyFont(font);
 	cs_free_sound(&sndLiftoff);
 	//cs_free_sound(&sndPlaying);
-	//cs_free_sound(&sndMenu);
+	cs_free_sound(&sndMenu);
 	cs_free_sound(&sndCrash);
-	cs_release_context(ctx);
+	cs_shutdown_context(ctx);
 	vk2dRendererQuit();
 	SDL_DestroyWindow(window);
 }

@@ -2258,7 +2258,7 @@ void cs_stop_all_sounds(cs_context_t* ctx)
 	// This is apart of the high level API, not the low level API.
 	// If using the low level API you must write your own function to
 	// stop playing all sounds.
-	CUTE_SOUND_ASSERT(ctx->playing_pool != 0);
+	//CUTE_SOUND_ASSERT(ctx->playing_pool != 0);
 
 	cs_lock(ctx);
 	cs_playing_sound_t* sound = ctx->playing;
