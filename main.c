@@ -7,10 +7,10 @@
 //     3. the longer you take to launch it the less money you make on the launch and money is ur score but a satellite down is hefty cost and 3 down = lose
 //
 // TODO:
-//   1. Indication of upcoming satellite with like name/portrait of company
-//   2. Audio
-//   3. Intro screen
-//   4. Baller soundtrack and better graphics
+//   1. Alien dude that can be shot down and will steal satellites
+//   2. Click satellites to activate thrusters
+//   3. Intro comic and tutorial screen
+//   4. Menu music
 #define SDL_MAIN_HANDLED
 #define CUTE_SOUND_IMPLEMENTATION
 #include "VK2D/VK2D.h"
@@ -39,7 +39,7 @@ const Dosh MINIMUM_PAYOUT = 500;
 const float PLANET_MINIMUM_RADIUS = 30;
 const float PLANET_MAXIMUM_RADIUS = 50;
 const float PLANET_MINIMUM_GRAVITY = 0.05;
-const float PLANET_MAXIMUM_GRAVITY = 0.12;
+const float PLANET_MAXIMUM_GRAVITY = 0.10;
 const int GAME_OVER_SATELLITE_COUNT = 3; // How many satellites must crash before game over
 const float STANDBY_COOLDOWN = 3; // In seconds
 const float MAXIMUM_SATELLITE_VELOCITY = 5;
@@ -67,6 +67,11 @@ const float LAUNCH_BUTTON_X = (GAME_WIDTH / 2) - 32 + 8;
 const float LAUNCH_BUTTON_Y = GAME_HEIGHT - HUD_OFFSET_Y - 64;
 const float SHAKE_INTENSITY = 5;
 const float SHAKE_DURATION = 0.2;
+const float FADE_IN_SECONDS = 1;
+const float COMIC_DURATION = 7;
+const float SATELLITE_SELECT_RADIUS = 14;
+const float SATELLITE_THRUSTER_DURATION = 0.75;
+const float SATELLITE_THRUSTER_VELOCITY = 0.65; // percent
 vec4 BLACK = {0, 0, 0, 1};
 vec4 WHITE = {1, 1, 1, 1};
 vec4 BLUE = {0, 0, 1, 1};
@@ -102,6 +107,7 @@ const char *CRASH_WAV = "assets/crash.wav";
 const char *PEOPLE_PNG = "assets/people.png";
 const char *HATS_PNG = "assets/hats.png";
 const char *ALIEN_PNG = "assets/alien.png";
+const char *TUTORIAL_PNG = "assets/tutorial.png";
 
 /******************** Structs ********************/
 // UBO for the post-fx shader
@@ -120,6 +126,8 @@ typedef struct Satellite {
 	vec4 colour;
 	float seed;
 	bool stolen; // In case an alien is currently stealing it
+	float thrusterTimer;
+	bool selected;
 } Satellite;
 
 // Distant small star
@@ -154,6 +162,7 @@ typedef struct Font {
 // Input things
 typedef struct Input {
 	const uint8_t *keys;
+	const uint8_t *lastKeys;
 	bool prm, plm, pmm; // Previous right mouse, previous left mouse ...
 	bool rm, lm, mm;
 	float mx, my;
@@ -177,16 +186,20 @@ typedef struct Assets {
 	cs_loaded_sound_t *sndLiftoff;
 	cs_loaded_sound_t *sndPlaying;
 	cs_loaded_sound_t *sndMenu;
+	VK2DTexture texTutorial;
 } Assets;
 
 // Big boy struct holding info for basically everything
 typedef struct Game {
+	// Engine type things
 	cs_context_t *cuteSound;
 	cs_play_sound_def_t def;
 	Input input;
 	Assets assets;
-	PostFX ubo;
+	PostFX ubo; // for the post processing shader
 	Font font;
+
+	// Important game state
 	Player player;
 	Planet planet;
 	bool playing; // False if player has already lost
@@ -194,6 +207,8 @@ typedef struct Game {
 	uint32_t listSize;
 	uint32_t numSatellites;
 	Satellite standby; // satellite waiting to be launched
+
+	// Various variables for the game
 	float standbyCooldown; // This is in frames
 	float time; // current frame
 	bool clickTheta, clickVelocity;
@@ -201,6 +216,8 @@ typedef struct Game {
 	float shakeDuration;
 	uint32_t selectedHat; // For the portrait at the bottom
 	uint32_t selectedPerson;
+	float tutorialTimer;
+	bool selectedSatellite; // to prevent selecting mutliple satellites at once
 } Game;
 
 /******************** Helper functions ********************/
@@ -282,6 +299,8 @@ void destroyFont(Font font) {
 void playSound(Game *game, cs_loaded_sound_t *sound, bool looping) {
 	game->def = cs_make_def(sound);
 	game->def.looped = looping;
+	game->def.volume_left = 0.5;
+	game->def.volume_right = 0.5;
 	cs_play_sound(game->cuteSound, game->def);
 }
 
@@ -334,6 +353,13 @@ void drawSatellite(float x, float y, bool drawAtSpecified, Satellite *sat) {
 	sat->colour[1] = 0.6 + ((sinf(sat->seed / 30) * 0.4));
 	sat->colour[2] = 0;
 	sat->colour[3] = 1;
+	// draw circle if selected
+	if (sat->selected) {
+		vec4 colour = {0, 0.5, 0.6, 0.5};
+		vk2dRendererSetColourMod(colour);
+		vk2dRendererDrawCircle(sat->x, sat->y, SATELLITE_SELECT_RADIUS);
+		vk2dRendererSetColourMod(DEFAULT_COLOUR);
+	}
 	vk2dRendererSetColourMod(sat->colour);
 	if (drawAtSpecified)
 		vk2dRendererDrawCircle(x, y, sat->radius);
@@ -357,12 +383,27 @@ void satelliteCrashEffects(Game *game, float x, float y) {
 // This will delete itself and any satellites it hits on a collision as well as update score and all that
 void updateSatellite(Game *game, uint32_t index) {
 	Satellite *sat = &game->satellites[index];
-	sat->x += cosf(sat->direction) * (sat->velocity);
-	sat->y += sinf(sat->direction) * (sat->velocity);
+
+	// Process thrusters/selecting
+	sat->selected = false;
+	sat->thrusterTimer -= 1;
+	if (!game->selectedSatellite && pointDistance(sat->x, sat->y, game->input.mx, game->input.my) < SATELLITE_SELECT_RADIUS) {
+		sat->selected = true;
+		if (game->input.lm && !game->input.plm)
+			sat->thrusterTimer = SATELLITE_THRUSTER_DURATION * 60;
+	}
+
+	// Process movement
+	float boost = 1;
+	if (sat->thrusterTimer > 0) {
+		boost = 1 + (SATELLITE_THRUSTER_VELOCITY * (sat->thrusterTimer / (SATELLITE_THRUSTER_DURATION * 60)));
+	}
+	sat->x += cosf(sat->direction) * (sat->velocity * boost);
+	sat->y += sinf(sat->direction) * (sat->velocity * boost);
 	// We have to add its current velocity vector to the vector of of planets gravity / 60 (its per second so must adjust it to be per frame)
 	float angle = pointAngle(sat->x, sat->y, GAME_WIDTH / 2, GAME_HEIGHT / 2);
-	float v3x = (cosf(sat->direction) * sat->velocity) + (cosf(angle) * (game->planet.gravity));// / 60));
-	float v3y = (sinf(sat->direction) * sat->velocity) + (sinf(angle) * (game->planet.gravity));// / 60));
+	float v3x = (cosf(sat->direction) * sat->velocity) + (cosf(angle) * (game->planet.gravity));
+	float v3y = (sinf(sat->direction) * sat->velocity) + (sinf(angle) * (game->planet.gravity));
 	sat->velocity = sqrtf(powf(v3x, 2) + powf(v3y, 2));
 	sat->direction = atan2f(v3y, v3x);
 
@@ -420,6 +461,7 @@ Status updateGame(Game *game) {
 		logHighScore(game);
 	}
 	bool launchButtonPressed = pointInRectangle(game->input.mx, game->input.my, LAUNCH_BUTTON_X, LAUNCH_BUTTON_Y, 64, 64) && game->input.lm;
+	game->selectedSatellite = false;
 
 	// Sway sliders back and forth
 	float velX = VELOCITY_SLIDER_X;
@@ -471,7 +513,7 @@ Status updateGame(Game *game) {
 
 	if (game->input.keys[SDL_SCANCODE_RETURN])
 		return Status_Menu;
-	else if (game->input.keys[SDL_SCANCODE_R])
+	else if (game->input.keys[SDL_SCANCODE_R] && !game->input.lastKeys[SDL_SCANCODE_R])
 		return Status_Restart;
 	return Status_Game;
 }
@@ -509,10 +551,10 @@ void drawGame(Game *game) {
 		vk2dDrawTexture(game->assets.texLaunchButton[index], LAUNCH_BUTTON_X, LAUNCH_BUTTON_Y);
 
 		// Various metrics
-		drawFont(game->font, "CRASHED SATELLITES", GAME_WIDTH - HUD_OFFSET_X - (18 * 8), HUD_OFFSET_Y);
-		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (18 * 8), HUD_OFFSET_Y + 17, 18 * 8, 4);
+		drawFont(game->font, "PUBLIC DISTRUST", GAME_WIDTH - HUD_OFFSET_X - (15 * 8), HUD_OFFSET_Y);
+		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (15 * 8), HUD_OFFSET_Y + 17, 15 * 8, 4);
 		vk2dRendererSetColourMod(RED);
-		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (18 * 8), HUD_OFFSET_Y + 17, clamp(((float)game->player.satellitesCrashed / GAME_OVER_SATELLITE_COUNT), 0, 1) * (18 * 8), 4);
+		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (15 * 8), HUD_OFFSET_Y + 17, clamp(((float)game->player.satellitesCrashed / GAME_OVER_SATELLITE_COUNT), 0, 1) * (15 * 8), 4);
 		vk2dRendererSetColourMod(DEFAULT_COLOUR);
 
 		drawFont(game->font, "PLANET GRAVITY", GAME_WIDTH - HUD_OFFSET_X - (14 * 8), HUD_OFFSET_Y + 23);
@@ -530,7 +572,7 @@ void drawGame(Game *game) {
 		// Portrait
 		if (game->standbyCooldown <= 0) {
 			vk2dDrawTexture(game->assets.texPeople[game->selectedPerson], GAME_WIDTH - HUD_OFFSET_X - 64, GAME_HEIGHT - HUD_OFFSET_Y - 96 - (18 * 2));
-			vk2dDrawTexture(game->assets.texHats[game->selectedHat], GAME_WIDTH - HUD_OFFSET_X - 64 + 5, GAME_HEIGHT - HUD_OFFSET_Y - 96 - (18 * 2) - 20);
+			vk2dDrawTexture(game->assets.texHats[game->selectedHat], GAME_WIDTH - HUD_OFFSET_X - 64 + 5, GAME_HEIGHT - HUD_OFFSET_Y - 96 - (18 * 2) - 4);
 			sprintf(score, "Sat Mass: %ikg", (int)round(game->standby.radius * 1000));
 			w = 8 * strlen(score);
 			drawFont(game->font, score, GAME_WIDTH - HUD_OFFSET_X - w, GAME_HEIGHT - 18 - 16 - HUD_OFFSET_Y);
@@ -545,19 +587,46 @@ void drawGame(Game *game) {
 }
 
 Status updateMenu(Game *game) {
+	static bool beganTutorial = false;
+	if (!beganTutorial) {
+		beganTutorial = true;
+		game->tutorialTimer = COMIC_DURATION * 60;
+	}
 	if (game->input.keys[SDL_SCANCODE_ESCAPE])
 		return Status_Quit;
-	else if (game->input.keys[SDL_SCANCODE_SPACE])
+	else if (game->input.keys[SDL_SCANCODE_SPACE] && !game->input.lastKeys[SDL_SCANCODE_SPACE] && game->tutorialTimer <= 0)
 		return Status_Game;
+	else if (game->input.keys[SDL_SCANCODE_SPACE] && game->tutorialTimer > 0)
+		game->tutorialTimer = 0;
+
+	if (game->tutorialTimer > 0)
+		game->tutorialTimer--;
+
 	return Status_Menu;
 }
 
 void drawMenu(Game *game) {
-	vk2dDrawTexture(game->assets.texMenu, 0, 0);
-	char score[50];
-	sprintf(score, "%.2f$", game->highscore);
-	float w = 8 * strlen(score);
-	drawFont(game->font, score, (GAME_WIDTH / 2) - (w / 2), 202);
+	if (game->input.keys[SDL_SCANCODE_T]) { // tutorial image
+		vk2dDrawTexture(game->assets.texTutorial, 0, 0);
+	} else if (game->tutorialTimer > 0) { // for the opening comic
+		vec4 fade = {1, 1, 1, 0};
+		if (game->tutorialTimer - (COMIC_DURATION * 60) <= FADE_IN_SECONDS * 60 && absf(game->tutorialTimer - (COMIC_DURATION * 60)) < FADE_IN_SECONDS * 60) {
+			fade[3] = (absf(game->tutorialTimer - (COMIC_DURATION * 60))) / (FADE_IN_SECONDS * 60);
+		} else {
+			fade[3] = game->tutorialTimer / (FADE_IN_SECONDS * 60);
+		}
+		vk2dRendererSetColourMod(BLACK);
+		vk2dRendererClear();
+		vk2dRendererSetColourMod(fade);
+		vk2dDrawTexture(game->assets.texIntro, 0, 0);
+		vk2dRendererSetColourMod(DEFAULT_COLOUR);
+	} else { // usual menu stuff
+		vk2dDrawTexture(game->assets.texMenu, 0, 0);
+		char score[50];
+		sprintf(score, "%.2f$", game->highscore);
+		float w = 8 * strlen(score);
+		drawFont(game->font, score, (GAME_WIDTH / 2) - (w / 2), 202);
+	}
 }
 
 // The game
@@ -626,10 +695,13 @@ void spacelink(int windowWidth, int windowHeight) {
 	cs_loaded_sound_t sndPlaying = cs_load_wav(PLAYING_WAV);
 	cs_loaded_sound_t sndMenu = cs_load_wav(MENU_WAV);
 	cs_loaded_sound_t sndCrash = cs_load_wav(CRASH_WAV);
+	VK2DImage imgTutorial = vk2dImageLoad(vk2dRendererGetDevice(), TUTORIAL_PNG);
+	VK2DTexture texTutorial = vk2dTextureLoad(imgTutorial, 0, 0, 400, 400);
 
 	/******************** Game variables ********************/
 	GameState state = GameState_Menu;
 	Game game = {};
+	game.input.lastKeys = malloc(keyCount);
 	game.font = font;
 	game.input.keys = SDL_GetKeyboardState(&keyCount);
 	game.assets.texGameOver = texGameOver;
@@ -657,6 +729,7 @@ void spacelink(int windowWidth, int windowHeight) {
 	game.assets.sndPlaying = &sndPlaying;
 	game.assets.sndMenu = &sndMenu;
 	game.assets.sndCrash = &sndCrash;
+	game.assets.texTutorial = texTutorial;
 
 	// Load highscore
 	FILE *hs = fopen(SCORE_FILE, "r");
@@ -676,6 +749,7 @@ void spacelink(int windowWidth, int windowHeight) {
 	}
 
 	while (running) {
+		memcpy((void*)game.input.lastKeys, game.input.keys, keyCount);
 		while (SDL_PollEvent(&ev))
 			if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_CLOSE)
 				running = false;
@@ -776,6 +850,7 @@ void spacelink(int windowWidth, int windowHeight) {
 
 	/******************** Cleanup ********************/
 	vk2dRendererWait();
+	free((void*)game.input.lastKeys);
 	vk2dShaderFree(shaderPostFX);
 	vk2dTextureFree(backbuffer);
 	vk2dImageFree(imgCursor);
@@ -795,6 +870,8 @@ void spacelink(int windowWidth, int windowHeight) {
 	vk2dImageFree(imgPeople);
 	vk2dTextureFree(texAlien);
 	vk2dImageFree(imgAlien);
+	vk2dImageFree(imgTutorial);
+	vk2dTextureFree(texTutorial);
 	vk2dTextureFree(texCannon);
 	vk2dTextureFree(texIntro);
 	vk2dImageFree(imgIntro);
