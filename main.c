@@ -8,9 +8,7 @@
 //
 // TODO:
 //   1. Alien dude that can be shot down and will steal satellites
-//   2. Click satellites to activate thrusters
-//   3. Intro comic and tutorial screen
-//   4. Menu music
+//   2. Menu music
 #define SDL_MAIN_HANDLED
 #define CUTE_SOUND_IMPLEMENTATION
 #include "VK2D/VK2D.h"
@@ -43,7 +41,7 @@ const float PLANET_MAXIMUM_GRAVITY = 0.10;
 const int GAME_OVER_SATELLITE_COUNT = 3; // How many satellites must crash before game over
 const float STANDBY_COOLDOWN = 3; // In seconds
 const float MAXIMUM_SATELLITE_VELOCITY = 5;
-const float MINIMUM_SATELLITE_VELOCITY = 3;
+const float MINIMUM_SATELLITE_VELOCITY = 1;
 const float MAXIMUM_SATELLITE_RADIUS = 4;
 const float MINIMUM_SATELLITE_RADIUS = 1;
 const float MAXIMUM_SATELLITE_DOSH = 4000;
@@ -70,8 +68,8 @@ const float SHAKE_DURATION = 0.2;
 const float FADE_IN_SECONDS = 1;
 const float COMIC_DURATION = 7;
 const float SATELLITE_SELECT_RADIUS = 14;
-const float SATELLITE_THRUSTER_DURATION = 0.75;
-const float SATELLITE_THRUSTER_VELOCITY = 0.65; // percent
+const float SATELLITE_THRUSTER_DURATION = 1.0;
+const float SATELLITE_THRUSTER_VELOCITY = 0.80; // percent
 vec4 BLACK = {0, 0, 0, 1};
 vec4 WHITE = {1, 1, 1, 1};
 vec4 BLUE = {0, 0, 1, 1};
@@ -611,9 +609,15 @@ void drawMenu(Game *game) {
 	} else if (game->tutorialTimer > 0) { // for the opening comic
 		vec4 fade = {1, 1, 1, 0};
 		if (game->tutorialTimer - (COMIC_DURATION * 60) <= FADE_IN_SECONDS * 60 && absf(game->tutorialTimer - (COMIC_DURATION * 60)) < FADE_IN_SECONDS * 60) {
-			fade[3] = (absf(game->tutorialTimer - (COMIC_DURATION * 60))) / (FADE_IN_SECONDS * 60);
+			fade[3] = clamp((absf(game->tutorialTimer - (COMIC_DURATION * 60))) / (FADE_IN_SECONDS * 60), 0, 1);
+			fade[2] = fade[3];
+			fade[1] = fade[3];
+			fade[0] = fade[3];
 		} else {
-			fade[3] = game->tutorialTimer / (FADE_IN_SECONDS * 60);
+			fade[3] = clamp(game->tutorialTimer / (FADE_IN_SECONDS * 60), 0, 1);
+			fade[2] = fade[3];
+			fade[1] = fade[3];
+			fade[0] = fade[3];
 		}
 		vk2dRendererSetColourMod(BLACK);
 		vk2dRendererClear();
