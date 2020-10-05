@@ -8,7 +8,9 @@
 //
 // TODO:
 //   1. Alien dude that can be shot down and will steal satellites
-//   2. Menu music
+//   2. Particle effects on satellite thrusters, satellite crash, and the Alien
+//   3. Menu music
+//   4. More hats and people
 #define SDL_MAIN_HANDLED
 #define CUTE_SOUND_IMPLEMENTATION
 #include "VK2D/VK2D.h"
@@ -21,9 +23,11 @@
 #include <malloc.h>
 
 /******************** Types ********************/
-typedef double Dosh;
+typedef long double real; // adding the gravity and velocity vector can have really small decimals involved
+typedef real Dosh;
 typedef enum {GameState_Menu, GameState_Game} GameState;
 typedef enum {Status_Game, Status_Quit, Status_Menu, Status_Restart} Status;
+typedef enum {Alien_Angry, Alien_Roaming, Alien_Stealing, Alien_Standby, Alien_Casualty} AlienMood;
 
 /******************** Constants ********************/
 const int WINDOW_WIDTH = 800;
@@ -33,43 +37,45 @@ const int GAME_HEIGHT = 400;
 const uint32_t FONT_RANGE = 255;
 const uint32_t DEFAULT_LIST_EXTENSION = 10;
 const Dosh MONEY_LOSS_PER_SECOND = 300;
-const Dosh MINIMUM_PAYOUT = 500;
-const float PLANET_MINIMUM_RADIUS = 30;
-const float PLANET_MAXIMUM_RADIUS = 50;
-const float PLANET_MINIMUM_GRAVITY = 0.05;
-const float PLANET_MAXIMUM_GRAVITY = 0.10;
+const Dosh MINIMUM_PAYOUT = -500; // companies be grrrrr if you delay
+const real PLANET_MINIMUM_RADIUS = 30;
+const real PLANET_MAXIMUM_RADIUS = 50;
+const real PLANET_MINIMUM_GRAVITY = 0.010;
+const real PLANET_MAXIMUM_GRAVITY = 0.013;
 const int GAME_OVER_SATELLITE_COUNT = 3; // How many satellites must crash before game over
-const float STANDBY_COOLDOWN = 3; // In seconds
-const float MAXIMUM_SATELLITE_VELOCITY = 5;
-const float MINIMUM_SATELLITE_VELOCITY = 1;
-const float MAXIMUM_SATELLITE_RADIUS = 4;
-const float MINIMUM_SATELLITE_RADIUS = 1;
-const float MAXIMUM_SATELLITE_DOSH = 4000;
-const float MINIMUM_SATELLITE_DOSH = 1500;
-const float MAXIMUM_SATELLITE_ANGLE = (VK2D_PI * 3) / 2;
-const float MINIMUM_SATELLITE_ANGLE = VK2D_PI / 2;
-const float SATELLITE_RADIAL_BONUS = 500; // Bonus dosh per radius of a satellite since bigger == more difficult
-const float LAUNCH_DISTANCE = 20; // Distance from the planet satellites are launched from
-const float HUD_OFFSET_X = 8;
-const float HUD_OFFSET_Y = 8;
-const float HUD_BUTTON_WEIGHT = 0.02; // How slow hud buttons move
-const float VELOCITY_VARIANCE = (MAXIMUM_SATELLITE_VELOCITY - MINIMUM_SATELLITE_VELOCITY) * 0.05;
-const float THETA_VARIANCE = (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE) * 0.05;
-const float SLIDER_W = 160;
-const float SLIDER_H = 24;
-const float THETA_SLIDER_X = HUD_OFFSET_X;
-const float THETA_SLIDER_Y = GAME_HEIGHT - HUD_OFFSET_Y - (SLIDER_H * 2) - 2;
-const float VELOCITY_SLIDER_X = HUD_OFFSET_X;
-const float VELOCITY_SLIDER_Y = GAME_HEIGHT - HUD_OFFSET_Y - SLIDER_H;
-const float LAUNCH_BUTTON_X = (GAME_WIDTH / 2) - 32 + 8;
-const float LAUNCH_BUTTON_Y = GAME_HEIGHT - HUD_OFFSET_Y - 64;
-const float SHAKE_INTENSITY = 5;
-const float SHAKE_DURATION = 0.2;
-const float FADE_IN_SECONDS = 1;
-const float COMIC_DURATION = 7;
-const float SATELLITE_SELECT_RADIUS = 14;
-const float SATELLITE_THRUSTER_DURATION = 1.0;
-const float SATELLITE_THRUSTER_VELOCITY = 0.80; // percent
+const real STANDBY_COOLDOWN = 3; // In seconds
+const real MAXIMUM_SATELLITE_VELOCITY = 1.8;
+const real MINIMUM_SATELLITE_VELOCITY = 1;
+const real MAXIMUM_SATELLITE_RADIUS = 4;
+const real MINIMUM_SATELLITE_RADIUS = 1;
+const real MAXIMUM_SATELLITE_DOSH = 5000;
+const real MINIMUM_SATELLITE_DOSH = 4000;
+const real MAXIMUM_SATELLITE_ANGLE = (VK2D_PI * 3) / 2;
+const real MINIMUM_SATELLITE_ANGLE = VK2D_PI / 2;
+const real SATELLITE_RADIAL_BONUS = 500; // Bonus dosh per radius of a satellite since bigger == more difficult
+const real LAUNCH_DISTANCE = 20; // Distance from the planet satellites are launched from
+const real HUD_OFFSET_X = 8;
+const real HUD_OFFSET_Y = 8;
+const real HUD_BUTTON_WEIGHT = 0.02; // How slow hud buttons move
+const real VELOCITY_VARIANCE = (MAXIMUM_SATELLITE_VELOCITY - MINIMUM_SATELLITE_VELOCITY) * 0.05;
+const real THETA_VARIANCE = (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE) * 0.05;
+const real SLIDER_W = 160;
+const real SLIDER_H = 24;
+const real THETA_SLIDER_X = HUD_OFFSET_X;
+const real THETA_SLIDER_Y = GAME_HEIGHT - HUD_OFFSET_Y - (SLIDER_H * 2) - 2;
+const real VELOCITY_SLIDER_X = HUD_OFFSET_X;
+const real VELOCITY_SLIDER_Y = GAME_HEIGHT - HUD_OFFSET_Y - SLIDER_H;
+const real LAUNCH_BUTTON_X = (GAME_WIDTH / 2) - 32 + 8;
+const real LAUNCH_BUTTON_Y = GAME_HEIGHT - HUD_OFFSET_Y - 64;
+const real SHAKE_INTENSITY = 5;
+const real SHAKE_DURATION = 0.2;
+const real FADE_IN_SECONDS = 1;
+const real COMIC_DURATION = 7;
+const real SATELLITE_SELECT_RADIUS = 14;
+const real SATELLITE_THRUSTER_DURATION = 1.0;
+const real SATELLITE_THRUSTER_VELOCITY = 0.80; // percent
+const real ALIEN_PISSED_OFF_COOLDOWN = 3; // How long before the alien returns to steal something
+const real ALIEN_ROAMING_COOLDOWN = 15; // How long till the alien returns in roaming state
 vec4 BLACK = {0, 0, 0, 1};
 vec4 WHITE = {1, 1, 1, 1};
 vec4 BLUE = {0, 0, 1, 1};
@@ -110,51 +116,58 @@ const char *TUTORIAL_PNG = "assets/tutorial.png";
 /******************** Structs ********************/
 // UBO for the post-fx shader
 typedef struct PostFX {
-	float trip; // How trippy
-	float dir;  // Direction of trippy-ness
+	real trip; // How trippy
+	real dir;  // Direction of trippy-ness
 } PostFX;
 
 // Describes info for satellites launched
 typedef struct Satellite {
-	float velocity;
-	float direction;
-	float radius;
-	float x, y;
+	real velocity;
+	real direction;
+	real radius;
+	real x, y;
 	Dosh cost;
 	vec4 colour;
-	float seed;
+	real seed;
 	bool stolen; // In case an alien is currently stealing it
-	float thrusterTimer;
+	real thrusterTimer;
 	bool selected;
 } Satellite;
 
 // Distant small star
 typedef struct Star {
-	float radius;
-	float x;
-	float y;
+	real radius;
+	real x;
+	real y;
 } Star;
 
 // Info as it pertains to a given planet
 typedef struct Planet {
-	float gravity;
-	float radius;
+	real gravity;
+	real radius;
 } Planet;
 
 // Player information for things like score and satellites crashed - will be singleton
 typedef struct Player {
 	int satellitesCrashed;
-	float standbyVelocity;
-	float standbyDirection;
+	real standbyVelocity;
+	real standbyDirection;
 	Dosh score;
 } Player;
+
+typedef struct Alien {
+	AlienMood mood;
+	real x, y;
+	real cooldown;
+	real direction;
+} Alien;
 
 // A simple bitmap font renderer
 typedef struct Font {
 	VK2DImage sheet; // Image all the characters are on
 	VK2DTexture *characters; // 255 long array for ascii characters
-	float w;
-	float h;
+	real w;
+	real h;
 } Font;
 
 // Input things
@@ -163,7 +176,7 @@ typedef struct Input {
 	const uint8_t *lastKeys;
 	bool prm, plm, pmm; // Previous right mouse, previous left mouse ...
 	bool rm, lm, mm;
-	float mx, my;
+	real mx, my;
 } Input;
 
 // Collection of needed assets
@@ -205,21 +218,22 @@ typedef struct Game {
 	uint32_t listSize;
 	uint32_t numSatellites;
 	Satellite standby; // satellite waiting to be launched
+	Alien alien;
 
 	// Various variables for the game
-	float standbyCooldown; // This is in frames
-	float time; // current frame
+	real standbyCooldown; // This is in frames
+	real time; // current frame
 	bool clickTheta, clickVelocity;
 	Dosh highscore;
-	float shakeDuration;
+	real shakeDuration;
 	uint32_t selectedHat; // For the portrait at the bottom
 	uint32_t selectedPerson;
-	float tutorialTimer;
+	real tutorialTimer;
 	bool selectedSatellite; // to prevent selecting mutliple satellites at once
 } Game;
 
 /******************** Helper functions ********************/
-static inline float sign(float n) {
+static inline real sign(real n) {
 	if (n > 0)
 		return 1;
 	if (n < 0)
@@ -227,23 +241,23 @@ static inline float sign(float n) {
 	return 0;
 }
 
-static inline float pointAngle(float x1, float y1, float x2, float y2) {
-	return -atan2f(y1 - y2, x2 - x1);
+static inline real pointAngle(real x1, real y1, real x2, real y2) {
+	return -atan2l(y1 - y2, x2 - x1);
 }
 
-static inline float pointDistance(float x1, float y1, float x2, float y2) {
-	return sqrtf(powf(y2 - y1, 2) + powf(x2 - x1, 2));
+static inline real pointDistance(real x1, real y1, real x2, real y2) {
+	return sqrtl(powl(y2 - y1, 2) + powl(x2 - x1, 2));
 }
 
-static inline bool pointInRectangle(float x, float y, float x1, float y1, float w, float h) {
+static inline bool pointInRectangle(real x, real y, real x1, real y1, real w, real h) {
 	return (x >= x1 && x <= x1 + w && y >= y1 && y <= y1 + h);
 }
 
-static inline float absf(float f) {
+static inline real absl(real f) {
 	return f < 0 ? -f : f;
 }
 
-static float clamp(float x, float min, float max) {
+static real clamp(real x, real min, real max) {
 	return x < min ? min : (x > max ? max : x);
 }
 
@@ -251,7 +265,7 @@ static float clamp(float x, float min, float max) {
 Font loadFont(const char *filename, uint32_t width, uint32_t height, uint32_t startIndex, uint32_t endIndex) {
 	Font font = {};
 	uint32_t i;
-	float x, y;
+	real x, y;
 	x = 0;
 	y = 0;
 	font.w = width;
@@ -271,18 +285,18 @@ Font loadFont(const char *filename, uint32_t width, uint32_t height, uint32_t st
 	return font;
 }
 
-void drawFont(Font font, const char *string, float x, float y) {
-	float i = 0;
+void drawFont(Font font, const char *string, real x, real y) {
+	real i = 0;
 	while (*string != 0)
 		vk2dDrawTexture(font.characters[(uint32_t)(*(string++))], x + (i++ * font.w), y);
 }
 
 // Same as above but with numbers at the end of the string
-void drawFontNumber(Font font, const char *string, float num, float x, float y) {
+void drawFontNumber(Font font, const char *string, real num, real x, real y) {
 	drawFont(font, string, x, y);
 	char numbers[30];
-	sprintf(numbers, "%.2f", num);
-	drawFont(font, numbers, x + ((float)strlen(string) * font.w), y);
+	sprintf(numbers, "%.2lf", (double)num);
+	drawFont(font, numbers, x + ((real)strlen(string) * font.w), y);
 }
 
 void destroyFont(Font font) {
@@ -305,22 +319,22 @@ void playSound(Game *game, cs_loaded_sound_t *sound, bool looping) {
 void logHighScore(Game *game) {
 	game->highscore = game->highscore < game->player.score ? game->player.score : game->highscore;
 	FILE *hs = fopen(SCORE_FILE, "w");
-	fprintf(hs, "%lf", game->highscore);
+	fprintf(hs, "%lf", (double)game->highscore);
 	fclose(hs);
 }
 
 Planet genRandomPlanet() {
 	Planet planet = {};
-	planet.radius = PLANET_MINIMUM_RADIUS + ((float)rand() / RAND_MAX) * (PLANET_MAXIMUM_RADIUS - PLANET_MINIMUM_RADIUS);
-	planet.gravity = PLANET_MINIMUM_GRAVITY + ((float)rand() / RAND_MAX) * (PLANET_MAXIMUM_GRAVITY - PLANET_MINIMUM_GRAVITY);
+	planet.radius = PLANET_MINIMUM_RADIUS + ((real)rand() / RAND_MAX) * (PLANET_MAXIMUM_RADIUS - PLANET_MINIMUM_RADIUS);
+	planet.gravity = PLANET_MINIMUM_GRAVITY + ((real)rand() / RAND_MAX) * (PLANET_MAXIMUM_GRAVITY - PLANET_MINIMUM_GRAVITY);
 	return planet;
 }
 
 // Satellites launch from the right side
 Satellite genRandomSatellite(Planet *planet) {
 	Satellite sat = {};
-	sat.radius = MINIMUM_SATELLITE_RADIUS + ((float)rand() / RAND_MAX) * (MAXIMUM_SATELLITE_RADIUS - MINIMUM_SATELLITE_RADIUS);
-	sat.cost = (MINIMUM_SATELLITE_DOSH + ((float)rand() / RAND_MAX) * (MAXIMUM_SATELLITE_DOSH - MINIMUM_SATELLITE_DOSH)) + (sat.radius * SATELLITE_RADIAL_BONUS);
+	sat.radius = MINIMUM_SATELLITE_RADIUS + ((real)rand() / RAND_MAX) * (MAXIMUM_SATELLITE_RADIUS - MINIMUM_SATELLITE_RADIUS);
+	sat.cost = (MINIMUM_SATELLITE_DOSH + ((real)rand() / RAND_MAX) * (MAXIMUM_SATELLITE_DOSH - MINIMUM_SATELLITE_DOSH)) + (sat.radius * SATELLITE_RADIAL_BONUS);
 	sat.seed = rand();
 	return sat;
 }
@@ -336,8 +350,8 @@ void loadStandby(Game *game) {
 		extendSatelliteList(game);
 	game->standby.velocity = game->player.standbyVelocity;
 	game->standby.direction = game->player.standbyDirection;
-	game->standby.x = (GAME_WIDTH / 2) + game->planet.radius + (cosf(VK2D_PI-game->player.standbyDirection) * LAUNCH_DISTANCE);
-	game->standby.y = (GAME_HEIGHT / 2) + (sinf(VK2D_PI-game->player.standbyDirection) * LAUNCH_DISTANCE);
+	game->standby.x = (GAME_WIDTH / 2) + game->planet.radius + (cosl(VK2D_PI-game->player.standbyDirection) * LAUNCH_DISTANCE);
+	game->standby.y = (GAME_HEIGHT / 2) + (sinl(VK2D_PI-game->player.standbyDirection) * LAUNCH_DISTANCE);
 	game->player.score += game->standby.cost;
 	game->satellites[game->numSatellites] = game->standby;
 	game->standbyCooldown = STANDBY_COOLDOWN;
@@ -345,10 +359,10 @@ void loadStandby(Game *game) {
 	game->numSatellites++;
 }
 
-void drawSatellite(float x, float y, bool drawAtSpecified, Satellite *sat) {
+void drawSatellite(real x, real y, bool drawAtSpecified, Satellite *sat) {
 	sat->seed++;
-	sat->colour[0] = 0.6 + ((sinf(sat->seed / 30) * 0.4));
-	sat->colour[1] = 0.6 + ((sinf(sat->seed / 30) * 0.4));
+	sat->colour[0] = 0.6 + ((sinl(sat->seed / 30) * 0.4));
+	sat->colour[1] = 0.6 + ((sinl(sat->seed / 30) * 0.4));
 	sat->colour[2] = 0;
 	sat->colour[3] = 1;
 	// draw circle if selected
@@ -373,7 +387,7 @@ void removeSatellite(Game *game, uint32_t index) {
 	game->numSatellites--;
 }
 
-void satelliteCrashEffects(Game *game, float x, float y) {
+void satelliteCrashEffects(Game *game, real x, real y) {
 	game->player.satellitesCrashed++;
 	game->shakeDuration = SHAKE_DURATION * 60;
 }
@@ -392,28 +406,28 @@ void updateSatellite(Game *game, uint32_t index) {
 	}
 
 	// Process movement
-	float boost = 1;
+	real boost = 1;
 	if (sat->thrusterTimer > 0) {
 		boost = 1 + (SATELLITE_THRUSTER_VELOCITY * (sat->thrusterTimer / (SATELLITE_THRUSTER_DURATION * 60)));
 	}
-	sat->x += cosf(sat->direction) * (sat->velocity * boost);
-	sat->y += sinf(sat->direction) * (sat->velocity * boost);
+	sat->x += cosl(sat->direction) * (sat->velocity * boost);
+	sat->y += sinl(sat->direction) * (sat->velocity * boost);
 	// We have to add its current velocity vector to the vector of of planets gravity / 60 (its per second so must adjust it to be per frame)
-	float angle = pointAngle(sat->x, sat->y, GAME_WIDTH / 2, GAME_HEIGHT / 2);
-	float v3x = (cosf(sat->direction) * sat->velocity) + (cosf(angle) * (game->planet.gravity));
-	float v3y = (sinf(sat->direction) * sat->velocity) + (sinf(angle) * (game->planet.gravity));
-	sat->velocity = sqrtf(powf(v3x, 2) + powf(v3y, 2));
-	sat->direction = atan2f(v3y, v3x);
+	real angle = pointAngle(sat->x, sat->y, GAME_WIDTH / 2, GAME_HEIGHT / 2);
+	real v3x = (cosl(sat->direction) * sat->velocity) + (cosl(angle) * (game->planet.gravity));
+	real v3y = (sinl(sat->direction) * sat->velocity) + (sinl(angle) * (game->planet.gravity));
+	sat->velocity = sqrtl(powl(v3x, 2) + powl(v3y, 2));
+	sat->direction = atan2l(v3y, v3x);
 
 	// Check collisions with every other satellite and the planet
-	if (absf(pointDistance(sat->x, sat->y, GAME_WIDTH / 2, GAME_HEIGHT / 2)) < game->planet.radius) { // planet collisions are a bit forgiving b/c doesn't factor in sat radius
+	if (absl(pointDistance(sat->x, sat->y, GAME_WIDTH / 2, GAME_HEIGHT / 2)) < game->planet.radius) { // planet collisions are a bit forgiving b/c doesn't factor in sat radius
 		satelliteCrashEffects(game, sat->x, sat->y);
 		removeSatellite(game, index);
 		playSound(game, game->assets.sndCrash, false);
 	} else {
 		bool dead = false;
 		for (uint32_t i = 0; i < game->numSatellites && !dead; i++) {
-			if (i != index && absf(pointDistance(sat->x, sat->y, game->satellites[i].x, game->satellites[i].y)) < game->satellites[i].radius + sat->radius) {
+			if (i != index && absl(pointDistance(sat->x, sat->y, game->satellites[i].x, game->satellites[i].y)) < game->satellites[i].radius + sat->radius) {
 				dead = true;
 				satelliteCrashEffects(game, sat->x, sat->y);
 				removeSatellite(game, index);
@@ -425,6 +439,41 @@ void updateSatellite(Game *game, uint32_t index) {
 			}
 		}
 	}
+}
+
+void removeAlienFromScene(Game *game, AlienMood newMood) {
+	game->alien.x = 5000;
+	game->alien.y = 5000;
+	game->alien.mood = newMood;
+}
+
+void updateAlien(Game *game) {
+	/* --Alien AI algorithm--
+	 * There are a bunch of different "moods" (states) the alien can
+	 * be in, but he serves two main purposes and the moods are just
+	 * implementation details.
+	 *
+	 *  1. Oscillate through the scene left to right, possibly getting hit by a satellite
+	 *  2. If hit, crashes off-screen and comes back to steal a satellite to the player's benefit
+	 *
+	 * To be more specific,
+	 *
+	 *  1. Start in Alien_Standby and wait ALIEN_ROAMING_COOLDOWN seconds before showing up and transitioning to Alien_Roaming
+	 *  2. Spawn in a random spot on the left side of the screen, move right and use sin(time) to determine y position (oscillate)
+	 *  3. If the alien makes it to the right side unscathed, remove from scene and go back to step 1 in the
+	 *  4. If hit, spiral off the screen in the state Alien_Casualty
+	 *  5. Once off screen in Alien_Casualty state, go to the Alien_Angry state and wait ALIEN_PISSED_OFF_COOLDOWN seconds
+	 *  6. After waiting, transition to the Alien_Stealing state at which point the alien flies across the screen snagging a satellite
+	 *  7. Return to step 1 once off screen
+	 * */
+	// TODO: This
+}
+
+void drawAlien(Game *game) {
+	if (game->alien.mood == Alien_Casualty)
+		vk2dRendererDrawTexture(game->assets.texAlien, game->alien.x, game->alien.y, 1, 1, game->time / 30, 16, 8);
+	else
+		vk2dRendererDrawTexture(game->assets.texAlien, game->alien.x, game->alien.y, 1, 1, game->alien.direction + VK2D_PI, 16, 8);
 }
 
 /****************** Game functions ******************/
@@ -448,6 +497,7 @@ void setupGame(Game *game) {
 	game->player.standbyDirection = MINIMUM_SATELLITE_ANGLE + (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE) / 2;
 	game->playing = true;
 	game->standbyCooldown = STANDBY_COOLDOWN * 2 * 60;
+	game->alien.mood = Alien_Standby;
 }
 
 Status updateGame(Game *game) {
@@ -462,26 +512,26 @@ Status updateGame(Game *game) {
 	game->selectedSatellite = false;
 
 	// Sway sliders back and forth
-	float velX = VELOCITY_SLIDER_X;
-	float velY = VELOCITY_SLIDER_Y;
-	float thetaX = THETA_SLIDER_X;
-	float thetaY = THETA_SLIDER_Y;
-	float time = game->time / 60;
-	game->player.standbyVelocity += sinf(time) * (VELOCITY_VARIANCE / 60);
-	game->player.standbyDirection += cosf(time) * (THETA_VARIANCE / 60);
+	real velX = VELOCITY_SLIDER_X;
+	real velY = VELOCITY_SLIDER_Y;
+	real thetaX = THETA_SLIDER_X;
+	real thetaY = THETA_SLIDER_Y;
+	real time = game->time / 60;
+	game->player.standbyVelocity += sinl(time) * (VELOCITY_VARIANCE / 60);
+	game->player.standbyDirection += cosl(time) * (THETA_VARIANCE / 60);
 	game->player.standbyDirection = clamp(game->player.standbyDirection, MINIMUM_SATELLITE_ANGLE, MAXIMUM_SATELLITE_ANGLE);
 	game->player.standbyVelocity = clamp(game->player.standbyVelocity, MINIMUM_SATELLITE_VELOCITY, MAXIMUM_SATELLITE_VELOCITY);
 
 	// Allow the player to drag the sliders
 	if ((pointInRectangle(game->input.mx, game->input.my, velX, velY, SLIDER_W, SLIDER_H) && game->input.lm && !game->clickTheta) || (game->clickVelocity && !game->clickTheta)) {
-		float relative = clamp((game->input.mx - velX) / SLIDER_W, 0, 1);
-		float difference = (MINIMUM_SATELLITE_VELOCITY + (relative * (MAXIMUM_SATELLITE_VELOCITY - MINIMUM_SATELLITE_VELOCITY))) - game->player.standbyVelocity;
+		real relative = clamp((game->input.mx - velX) / SLIDER_W, 0, 1);
+		real difference = (MINIMUM_SATELLITE_VELOCITY + (relative * (MAXIMUM_SATELLITE_VELOCITY - MINIMUM_SATELLITE_VELOCITY))) - game->player.standbyVelocity;
 		game->player.standbyVelocity += difference * HUD_BUTTON_WEIGHT;
 		game->clickVelocity = true;
 	}
 	if ((pointInRectangle(game->input.mx, game->input.my, thetaX, thetaY, SLIDER_W, SLIDER_H) && game->input.lm && !game->clickVelocity) || (game->clickTheta && !game->clickVelocity)) {
-		float relative = clamp((game->input.mx - thetaX) / SLIDER_W, 0, 1);
-		float difference = (MINIMUM_SATELLITE_ANGLE + (relative * (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE))) - game->player.standbyDirection;
+		real relative = clamp((game->input.mx - thetaX) / SLIDER_W, 0, 1);
+		real difference = (MINIMUM_SATELLITE_ANGLE + (relative * (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE))) - game->player.standbyDirection;
 		game->player.standbyDirection += difference * HUD_BUTTON_WEIGHT;
 		game->clickTheta = true;
 	}
@@ -489,6 +539,9 @@ Status updateGame(Game *game) {
 		game->clickTheta = false;
 		game->clickVelocity = false;
 	}
+
+	// ALIEN
+	updateAlien(game);
 
 	// Launching satellites/cooldown/payout
 	if (game->standbyCooldown != 0) {
@@ -525,6 +578,8 @@ void drawGame(Game *game) {
 	for (uint32_t i = 0; i < game->numSatellites; i++)
 		drawSatellite(0, 0, false, &game->satellites[i]);
 
+	drawAlien(game);
+
 	if (game->playing) {
 		/******************** Draw the HUD ********************/
 		// Standby
@@ -552,7 +607,7 @@ void drawGame(Game *game) {
 		drawFont(game->font, "PUBLIC DISTRUST", GAME_WIDTH - HUD_OFFSET_X - (15 * 8), HUD_OFFSET_Y);
 		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (15 * 8), HUD_OFFSET_Y + 17, 15 * 8, 4);
 		vk2dRendererSetColourMod(RED);
-		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (15 * 8), HUD_OFFSET_Y + 17, clamp(((float)game->player.satellitesCrashed / GAME_OVER_SATELLITE_COUNT), 0, 1) * (15 * 8), 4);
+		vk2dDrawRectangle(GAME_WIDTH - HUD_OFFSET_X - (15 * 8), HUD_OFFSET_Y + 17, clamp(((real)game->player.satellitesCrashed / GAME_OVER_SATELLITE_COUNT), 0, 1) * (15 * 8), 4);
 		vk2dRendererSetColourMod(DEFAULT_COLOUR);
 
 		drawFont(game->font, "PLANET GRAVITY", GAME_WIDTH - HUD_OFFSET_X - (14 * 8), HUD_OFFSET_Y + 23);
@@ -563,8 +618,8 @@ void drawGame(Game *game) {
 
 		// Current score
 		char score[50];
-		sprintf(score, "Dosh: %.2f$", game->player.score);
-		float w = 8 * strlen(score);
+		sprintf(score, "Dosh: %.2f$", (double)game->player.score);
+		real w = 8 * strlen(score);
 		drawFont(game->font, score, GAME_WIDTH - HUD_OFFSET_X - w, GAME_HEIGHT - 16 - HUD_OFFSET_Y);
 
 		// Portrait
@@ -578,8 +633,8 @@ void drawGame(Game *game) {
 	} else {
 		vk2dDrawTexture(game->assets.texGameOver, 0, 0);
 		char score[50];
-		sprintf(score, "Lost in bankruptcy: %.2f$", game->highscore);
-		float w = 8 * strlen(score);
+		sprintf(score, "Lost in bankruptcy: %.2f$", (double)game->highscore);
+		real w = 8 * strlen(score);
 		drawFont(game->font, score, (GAME_WIDTH / 2) - (w / 2), (GAME_HEIGHT / 2) + game->planet.radius + 20);
 	}
 }
@@ -608,8 +663,8 @@ void drawMenu(Game *game) {
 		vk2dDrawTexture(game->assets.texTutorial, 0, 0);
 	} else if (game->tutorialTimer > 0) { // for the opening comic
 		vec4 fade = {1, 1, 1, 0};
-		if (game->tutorialTimer - (COMIC_DURATION * 60) <= FADE_IN_SECONDS * 60 && absf(game->tutorialTimer - (COMIC_DURATION * 60)) < FADE_IN_SECONDS * 60) {
-			fade[3] = clamp((absf(game->tutorialTimer - (COMIC_DURATION * 60))) / (FADE_IN_SECONDS * 60), 0, 1);
+		if (game->tutorialTimer - (COMIC_DURATION * 60) <= FADE_IN_SECONDS * 60 && absl(game->tutorialTimer - (COMIC_DURATION * 60)) < FADE_IN_SECONDS * 60) {
+			fade[3] = clamp((absl(game->tutorialTimer - (COMIC_DURATION * 60))) / (FADE_IN_SECONDS * 60), 0, 1);
 			fade[2] = fade[3];
 			fade[1] = fade[3];
 			fade[0] = fade[3];
@@ -627,8 +682,8 @@ void drawMenu(Game *game) {
 	} else { // usual menu stuff
 		vk2dDrawTexture(game->assets.texMenu, 0, 0);
 		char score[50];
-		sprintf(score, "%.2f$", game->highscore);
-		float w = 8 * strlen(score);
+		sprintf(score, "%.2f$", (double)game->highscore);
+		real w = 8 * strlen(score);
 		drawFont(game->font, score, (GAME_WIDTH / 2) - (w / 2), 202);
 	}
 }
@@ -642,7 +697,7 @@ void spacelink(int windowWidth, int windowHeight) {
 	int keyCount;
 	bool running = true;
 	SDL_ShowCursor(SDL_DISABLE);
-	volatile double lastTime = SDL_GetPerformanceCounter();
+	volatile real lastTime = SDL_GetPerformanceCounter();
 
 	/******************** VK2D initialization ********************/
 	VK2DRendererConfig config = {msaa_32x, sm_TripleBuffer, ft_Nearest};
@@ -652,7 +707,7 @@ void spacelink(int windowWidth, int windowHeight) {
 
 	/******************** Asset loading ********************/
 	SDL_SysWMinfo wmInfo;
-	SDL_VERSION(&wmInfo.version);
+	SDL_VERSION(&wmInfo.version)
 	SDL_GetWindowWMInfo(window, &wmInfo);
 	HWND hwnd = wmInfo.info.win.window;
 	cs_context_t *ctx = cs_make_context(hwnd, 41000, 1024 * 1024 * 10, 20, NULL);
@@ -737,7 +792,9 @@ void spacelink(int windowWidth, int windowHeight) {
 
 	// Load highscore
 	FILE *hs = fopen(SCORE_FILE, "r");
-	fscanf(hs, "%lf", &game.highscore);
+	double n;
+	fscanf(hs, "%lf", &n);
+	game.highscore = n;
 	fclose(hs);
 
 	// Start the menu music
@@ -747,9 +804,9 @@ void spacelink(int windowWidth, int windowHeight) {
 	const uint32_t starCount = 50;
 	Star stars[starCount];
 	for (uint32_t i = 0; i < starCount; i++) {
-		stars[i].x = round(((float)rand() / RAND_MAX) * GAME_WIDTH);
-		stars[i].y = round(((float)rand() / RAND_MAX) * GAME_HEIGHT);
-		stars[i].radius = ceil(((float)rand() / RAND_MAX) * 3);
+		stars[i].x = round(((real)rand() / RAND_MAX) * GAME_WIDTH);
+		stars[i].y = round(((real)rand() / RAND_MAX) * GAME_HEIGHT);
+		stars[i].radius = ceil(((real)rand() / RAND_MAX) * 3);
 	}
 
 	while (running) {
@@ -763,7 +820,7 @@ void spacelink(int windowWidth, int windowHeight) {
 		/******************** Manage SDL input ********************/
 		SDL_PumpEvents();
 		int mx, my;
-		float xmouse, ymouse;
+		real xmouse, ymouse;
 		uint32_t mState = SDL_GetMouseState(&mx, &my);
 		game.input.plm = game.input.lm;
 		game.input.pmm = game.input.mm;
@@ -771,8 +828,8 @@ void spacelink(int windowWidth, int windowHeight) {
 		game.input.lm = mState & SDL_BUTTON(SDL_BUTTON_LEFT);
 		game.input.mm = mState & SDL_BUTTON(SDL_BUTTON_MIDDLE);
 		game.input.rm = mState & SDL_BUTTON(SDL_BUTTON_RIGHT);
-		xmouse = (mx / ((float)windowWidth / GAME_WIDTH)) + cam.x;
-		ymouse = (my / ((float)windowHeight / GAME_HEIGHT)) + cam.y;
+		xmouse = (mx / ((real)windowWidth / GAME_WIDTH)) + cam.x;
+		ymouse = (my / ((real)windowHeight / GAME_HEIGHT)) + cam.y;
 		game.input.mx = xmouse;
 		game.input.my = ymouse;
 
@@ -810,8 +867,8 @@ void spacelink(int windowWidth, int windowHeight) {
 			cam.x = 0;
 			cam.y = 0;
 		} else {
-			cam.x = ((float)rand() / RAND_MAX) * SHAKE_INTENSITY;
-			cam.y = ((float)rand() / RAND_MAX) * SHAKE_INTENSITY;
+			cam.x = ((real)rand() / RAND_MAX) * SHAKE_INTENSITY;
+			cam.y = ((real)rand() / RAND_MAX) * SHAKE_INTENSITY;
 		}
 		vk2dRendererSetCamera(cam);
 
@@ -838,14 +895,14 @@ void spacelink(int windowWidth, int windowHeight) {
 			drawGame(&game);
 
 		/******************** End of drawing/cursor ********************/
-		vk2dDrawTexture(texCursor, roundf(xmouse - 2), roundf(ymouse - 2));
+		vk2dDrawTexture(texCursor, roundl(xmouse - 2), roundl(ymouse - 2));
 		vk2dRendererSetTarget(VK2D_TARGET_SCREEN);
-		vk2dRendererDrawShader(shaderPostFX, backbuffer, cam.x, cam.y, (float)WINDOW_WIDTH / GAME_WIDTH, (float)WINDOW_HEIGHT / GAME_HEIGHT, 0, 0, 0);
+		vk2dRendererDrawShader(shaderPostFX, backbuffer, cam.x, cam.y, (real)WINDOW_WIDTH / GAME_WIDTH, (real)WINDOW_HEIGHT / GAME_HEIGHT, 0, 0, 0);
 		vk2dRendererEndFrame();
 
 		/******************** Lock to 60 ********************/
-		if ((double)SDL_GetPerformanceCounter() - lastTime < (double)SDL_GetPerformanceFrequency() / 60) {
-			while ((double)SDL_GetPerformanceCounter() - lastTime < (double)SDL_GetPerformanceFrequency() / 60) {
+		if ((real)SDL_GetPerformanceCounter() - lastTime < (real)SDL_GetPerformanceFrequency() / 60) {
+			while ((real)SDL_GetPerformanceCounter() - lastTime < (real)SDL_GetPerformanceFrequency() / 60) {
 				// do nothing lmao
 			}
 		}
