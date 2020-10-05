@@ -6,10 +6,6 @@
 //     2. they continue to orbit until they crash into earth or other shit u launched
 //     3. the longer you take to launch it the less money you make on the launch and money is ur score but a satellite down is hefty cost and 3 down = lose
 //
-// TODO:
-//   1. Particle effects on satellite thrusters, satellite crash, and the Alien
-//   2. Menu music
-//   3. More hats and people
 #define SDL_MAIN_HANDLED
 #define CUTE_SOUND_IMPLEMENTATION
 #include "VK2D/VK2D.h"
@@ -77,6 +73,7 @@ const real ALIEN_PISSED_OFF_COOLDOWN = 3; // How long before the alien returns t
 const real ALIEN_ROAMING_COOLDOWN = 10; // How long till the alien returns in roaming state
 const real ALIEN_MOVE_SPEED = 3;
 const real ALIEN_OSCILLATION = 40;
+const real PARTICLE_LIFESPAN = 1;
 vec4 BLACK = {0, 0, 0, 1};
 vec4 WHITE = {1, 1, 1, 1};
 vec4 BLUE = {0, 0, 1, 1};
@@ -134,6 +131,15 @@ typedef struct Satellite {
 	real thrusterTimer;
 	bool selected;
 } Satellite;
+
+typedef struct Particle {
+	real x, y;
+	real direction;
+	real velocity;
+	real cooldown;
+	vec4 colour;
+	real radius;
+} Particle;
 
 // Distant small star
 typedef struct Star {
@@ -211,6 +217,9 @@ typedef struct Game {
 	Assets assets;
 	PostFX ubo; // for the post processing shader
 	Font font;
+	Particle *particle;
+	uint32_t particleCount;
+	uint32_t particleListSize;
 
 	// Important game state
 	Player player;
@@ -310,6 +319,28 @@ void destroyFont(Font font) {
 }
 
 /****************** Functions helpful to the game ******************/
+
+void addParticles(Game *game, uint32_t count, real x, real y, real direction, real velocity, real radius, vec4 colour) {
+	while (game->particleListSize <= game->particleCount + count) {
+		game->particle = realloc(game->particle, sizeof(Particle) * (game->particleListSize + DEFAULT_LIST_EXTENSION));
+		game->particleListSize += DEFAULT_LIST_EXTENSION;
+	}
+	for (uint32_t i = game->particleCount; i < game->particleCount + count; i++) {
+		real chance = ((real)rand() / RAND_MAX);
+		game->particle[i].x = x;
+		game->particle[i].y = y;
+		game->particle[i].cooldown = PARTICLE_LIFESPAN * 60;
+		game->particle[i].radius = radius * chance;
+		game->particle[i].direction = direction + ((VK2D_PI / 2) * chance);
+		game->particle[i].velocity = velocity;
+		game->particle[i].colour[0] = colour[0];
+		game->particle[i].colour[1] = colour[1];
+		game->particle[i].colour[2] = colour[2];
+		game->particle[i].colour[3] = colour[3];
+	}
+	game->particleCount += count;
+}
+
 void playSound(Game *game, cs_loaded_sound_t *sound, bool looping) {
 	game->def = cs_make_def(sound);
 	game->def.looped = looping;
@@ -411,6 +442,7 @@ void updateSatellite(Game *game, uint32_t index) {
 	real boost = 1;
 	if (sat->thrusterTimer > 0) {
 		boost = 1 + (SATELLITE_THRUSTER_VELOCITY * (sat->thrusterTimer / (SATELLITE_THRUSTER_DURATION * 60)));
+		addParticles(game, 3, sat->x, sat->y, sat->direction - VK2D_PI, 1.5, 2, WHITE);
 	}
 	sat->x += cosl(sat->direction) * (sat->velocity * boost);
 	sat->y += sinl(sat->direction) * (sat->velocity * boost);
@@ -509,6 +541,7 @@ void updateAlien(Game *game) {
 			game->alien.cooldown = ALIEN_PISSED_OFF_COOLDOWN * 60;
 			removeAlienFromScene(game, Alien_Angry);
 		}
+		addParticles(game, 3, game->alien.x, game->alien.y, game->alien.direction - VK2D_PI, 1, 3, RED);
 	} else if (game->alien.mood == Alien_Stealing) {
 		if (game->numSatellites == 0 && !game->alien.stolen) {
 			game->alien.mood = Alien_Casualty;
@@ -631,7 +664,7 @@ Status updateGame(Game *game) {
 
 	if (game->input.keys[SDL_SCANCODE_RETURN])
 		return Status_Menu;
-	else if (game->input.keys[SDL_SCANCODE_R] && !game->input.lastKeys[SDL_SCANCODE_R])
+	else if (game->input.keys[SDL_SCANCODE_R])
 		return Status_Restart;
 	return Status_Game;
 }
@@ -714,9 +747,9 @@ Status updateMenu(Game *game) {
 	}
 	if (game->input.keys[SDL_SCANCODE_ESCAPE])
 		return Status_Quit;
-	else if (game->input.keys[SDL_SCANCODE_SPACE] && !game->input.lastKeys[SDL_SCANCODE_SPACE] && game->tutorialTimer <= 0)
+	else if (game->input.keys[SDL_SCANCODE_SPACE] && game->tutorialTimer <= 0)
 		return Status_Game;
-	else if (game->input.keys[SDL_SCANCODE_SPACE] && game->tutorialTimer > 0)
+	else if ((game->input.keys[SDL_SCANCODE_RETURN] || game->input.lm) && game->tutorialTimer > 0)
 		game->tutorialTimer = 0;
 
 	if (game->tutorialTimer > 0)
@@ -760,7 +793,7 @@ void spacelink(int windowWidth, int windowHeight) {
 	/******************** SDL initialization ********************/
 	SDL_Init(SDL_INIT_EVERYTHING);
 	SDL_Window *window = SDL_CreateWindow("Spacelink", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, windowWidth, windowHeight, SDL_WINDOW_VULKAN);
-	SDL_Event ev;
+	SDL_Event ev = {};
 	int keyCount;
 	bool running = true;
 	SDL_ShowCursor(SDL_DISABLE);
@@ -857,6 +890,7 @@ void spacelink(int windowWidth, int windowHeight) {
 	game.assets.sndCrash = &sndCrash;
 	game.assets.texTutorial = texTutorial;
 
+
 	// Load highscore
 	FILE *hs = fopen(SCORE_FILE, "r");
 	double n;
@@ -876,11 +910,13 @@ void spacelink(int windowWidth, int windowHeight) {
 		stars[i].radius = ceil(((real)rand() / RAND_MAX) * 3);
 	}
 
+	bool first = true;
 	while (running) {
-		memcpy((void*)game.input.lastKeys, game.input.keys, keyCount);
-		while (SDL_PollEvent(&ev))
+		//memcpy((void*)game.input.lastKeys, game.input.keys, keyCount);
+		while (SDL_PollEvent(&ev)) {
 			if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_CLOSE)
 				running = false;
+		}
 		VK2DCamera cam = vk2dRendererGetCamera();
 		cs_mix(ctx);
 
@@ -950,6 +986,22 @@ void spacelink(int windowWidth, int windowHeight) {
 		game.ubo.dir += (VK2D_PI * 2) / 60;
 		vk2dShaderUpdate(shaderPostFX, &game.ubo, sizeof(PostFX));
 
+		// Particles
+		for (uint32_t i = 0; i < game.particleCount; i++) {
+			game.particle[i].x += cosl(game.particle[i].direction) * game.particle[i].velocity;
+			game.particle[i].y += sinl(game.particle[i].direction) * game.particle[i].velocity;
+			game.particle[i].cooldown -= 1;
+			if (game.particle[i].cooldown <= 0) {
+				for (uint32_t j = i; j < game.particleCount - 1; j++)
+					game.particle[j] = game.particle[j + 1];
+				game.particleCount--;
+			} else {
+				vk2dRendererSetColourMod(game.particle[i].colour);
+				vk2dRendererDrawCircle(game.particle[i].x, game.particle[i].y, game.particle[i].radius * (game.particle[i].cooldown / (PARTICLE_LIFESPAN * 60)));
+				vk2dRendererSetColourMod(DEFAULT_COLOUR);
+			}
+		}
+
 		/******************** Gameplay drawing ********************/
 		// Starry background
 		vk2dRendererSetColourMod(STAR_COLOUR);
@@ -1006,6 +1058,7 @@ void spacelink(int windowWidth, int windowHeight) {
 	vk2dTextureFree(texPlanet);
 	vk2dImageFree(imgPlanet);
 	vk2dTextureFree(texMenu);
+	free(game.particle);
 	vk2dImageFree(imgMenu);
 	vk2dImageFree(imgCannon);
 	vk2dImageFree(imgTheta);
