@@ -7,10 +7,9 @@
 //     3. the longer you take to launch it the less money you make on the launch and money is ur score but a satellite down is hefty cost and 3 down = lose
 //
 // TODO:
-//   1. Alien dude that can be shot down and will steal satellites
-//   2. Particle effects on satellite thrusters, satellite crash, and the Alien
-//   3. Menu music
-//   4. More hats and people
+//   1. Particle effects on satellite thrusters, satellite crash, and the Alien
+//   2. Menu music
+//   3. More hats and people
 #define SDL_MAIN_HANDLED
 #define CUTE_SOUND_IMPLEMENTATION
 #include "VK2D/VK2D.h"
@@ -40,12 +39,12 @@ const Dosh MONEY_LOSS_PER_SECOND = 300;
 const Dosh MINIMUM_PAYOUT = -500; // companies be grrrrr if you delay
 const real PLANET_MINIMUM_RADIUS = 30;
 const real PLANET_MAXIMUM_RADIUS = 50;
-const real PLANET_MINIMUM_GRAVITY = 0.010;
-const real PLANET_MAXIMUM_GRAVITY = 0.013;
+const real PLANET_MINIMUM_GRAVITY = 0.012;
+const real PLANET_MAXIMUM_GRAVITY = 0.015;
 const int GAME_OVER_SATELLITE_COUNT = 3; // How many satellites must crash before game over
 const real STANDBY_COOLDOWN = 3; // In seconds
-const real MAXIMUM_SATELLITE_VELOCITY = 1.8;
-const real MINIMUM_SATELLITE_VELOCITY = 1;
+const real MAXIMUM_SATELLITE_VELOCITY = 2.0;
+const real MINIMUM_SATELLITE_VELOCITY = 1.3;
 const real MAXIMUM_SATELLITE_RADIUS = 4;
 const real MINIMUM_SATELLITE_RADIUS = 1;
 const real MAXIMUM_SATELLITE_DOSH = 5000;
@@ -75,7 +74,9 @@ const real SATELLITE_SELECT_RADIUS = 14;
 const real SATELLITE_THRUSTER_DURATION = 1.0;
 const real SATELLITE_THRUSTER_VELOCITY = 0.80; // percent
 const real ALIEN_PISSED_OFF_COOLDOWN = 3; // How long before the alien returns to steal something
-const real ALIEN_ROAMING_COOLDOWN = 15; // How long till the alien returns in roaming state
+const real ALIEN_ROAMING_COOLDOWN = 10; // How long till the alien returns in roaming state
+const real ALIEN_MOVE_SPEED = 3;
+const real ALIEN_OSCILLATION = 40;
 vec4 BLACK = {0, 0, 0, 1};
 vec4 WHITE = {1, 1, 1, 1};
 vec4 BLUE = {0, 0, 1, 1};
@@ -157,9 +158,10 @@ typedef struct Player {
 
 typedef struct Alien {
 	AlienMood mood;
-	real x, y;
+	real x, y, baseY;
 	real cooldown;
 	real direction;
+	bool stolen;
 } Alien;
 
 // A simple bitmap font renderer
@@ -466,14 +468,78 @@ void updateAlien(Game *game) {
 	 *  6. After waiting, transition to the Alien_Stealing state at which point the alien flies across the screen snagging a satellite
 	 *  7. Return to step 1 once off screen
 	 * */
-	// TODO: This
+	// Alien is basically a state machine
+	if (game->alien.mood == Alien_Standby) {
+		game->alien.cooldown -= 1;
+		if (game->alien.cooldown <= 0) {
+			game->alien.mood = Alien_Roaming;
+			game->alien.x = -16;
+			game->alien.baseY = 100 + (((float)rand() / RAND_MAX) * 100);
+			game->alien.y = game->alien.baseY;
+		}
+		game->alien.stolen = false;
+	} else if (game->alien.mood == Alien_Roaming) {
+		game->alien.x += ALIEN_MOVE_SPEED;
+		game->alien.y = game->alien.baseY + sinl(game->time / 15) * ALIEN_OSCILLATION;
+
+		// Collisions
+		bool collide = false;
+		for (uint32_t i = 0; i < game->numSatellites && !collide; i++)
+			if (pointDistance(game->alien.x, game->alien.y, game->satellites[i].x, game->satellites[i].y) < 16 + game->satellites[i].radius)
+				collide = true;
+
+		if (collide) {
+			game->alien.mood = Alien_Casualty;
+			game->alien.direction = ((float)rand() / RAND_MAX) * VK2D_PI * 2;
+		} else if (game->alien.x > GAME_WIDTH + 16) {
+			removeAlienFromScene(game, Alien_Standby);
+			game->alien.cooldown = ALIEN_ROAMING_COOLDOWN * 60;
+		}
+	} else if (game->alien.mood == Alien_Angry) {
+		game->alien.cooldown -= 1;
+		if (game->alien.cooldown <= 0) {
+			game->alien.mood = Alien_Stealing;
+			game->alien.x = -32;
+			game->alien.y = ((float)rand() / RAND_MAX) * GAME_WIDTH;
+		}
+	} else if (game->alien.mood == Alien_Casualty) {
+		game->alien.x += cosl(game->alien.direction) * ALIEN_MOVE_SPEED;
+		game->alien.y += sinl(game->alien.direction) * ALIEN_MOVE_SPEED;
+		if (game->alien.x > GAME_WIDTH || game->alien.x < -32 || game->alien.y > GAME_HEIGHT || game->alien.y < -32) {
+			game->alien.cooldown = ALIEN_PISSED_OFF_COOLDOWN * 60;
+			removeAlienFromScene(game, Alien_Angry);
+		}
+	} else if (game->alien.mood == Alien_Stealing) {
+		if (game->numSatellites == 0 && !game->alien.stolen) {
+			game->alien.mood = Alien_Casualty;
+			game->alien.direction = ((float)rand() / RAND_MAX) * VK2D_PI * 2;
+		} else if (!game->alien.stolen) {
+			Satellite *target = &game->satellites[0];
+			game->alien.direction = pointAngle(game->alien.x, game->alien.y, target->x, target->y);
+			game->alien.x += cosl(game->alien.direction) * ALIEN_MOVE_SPEED;
+			game->alien.y += sinl(game->alien.direction) * ALIEN_MOVE_SPEED;
+			if (pointDistance(game->alien.x, game->alien.y, target->x, target->y) < 16) {
+				game->alien.stolen = true;
+				removeSatellite(game, 0);
+			}
+		} else {
+			game->alien.x += cosl(game->alien.direction) * ALIEN_MOVE_SPEED;
+			game->alien.y += sinl(game->alien.direction) * ALIEN_MOVE_SPEED;
+			if (game->alien.x > GAME_WIDTH || game->alien.x < -32 || game->alien.y > GAME_HEIGHT || game->alien.y < -32) {
+				game->alien.cooldown = ALIEN_ROAMING_COOLDOWN * 60;
+				removeAlienFromScene(game, Alien_Standby);
+			}
+		}
+	}
 }
 
 void drawAlien(Game *game) {
 	if (game->alien.mood == Alien_Casualty)
-		vk2dRendererDrawTexture(game->assets.texAlien, game->alien.x, game->alien.y, 1, 1, game->time / 30, 16, 8);
+		vk2dRendererDrawTexture(game->assets.texAlien, game->alien.x - 16, game->alien.y - 8, 1, 1, game->time / 15, 16, 8);
+	else if (game->alien.mood != Alien_Roaming)
+		vk2dRendererDrawTexture(game->assets.texAlien, game->alien.x - 16, game->alien.y - 8, 1, 1, -game->alien.direction, 16, 8);
 	else
-		vk2dRendererDrawTexture(game->assets.texAlien, game->alien.x, game->alien.y, 1, 1, game->alien.direction + VK2D_PI, 16, 8);
+		vk2dRendererDrawTexture(game->assets.texAlien, game->alien.x - 16, game->alien.y - 8, 1, 1, 0, 16, 8);
 }
 
 /****************** Game functions ******************/
@@ -497,7 +563,8 @@ void setupGame(Game *game) {
 	game->player.standbyDirection = MINIMUM_SATELLITE_ANGLE + (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE) / 2;
 	game->playing = true;
 	game->standbyCooldown = STANDBY_COOLDOWN * 2 * 60;
-	game->alien.mood = Alien_Standby;
+	removeAlienFromScene(game, Alien_Standby);
+	game->alien.cooldown = ALIEN_ROAMING_COOLDOWN * 60;
 }
 
 Status updateGame(Game *game) {
@@ -751,8 +818,8 @@ void spacelink(int windowWidth, int windowHeight) {
 	VK2DTexture texGameOver = vk2dTextureLoad(imgGameOver, 0, 0, 400, 400);
 	Font font = loadFont("assets/font.png", 8, 16, 0, 255);
 	cs_loaded_sound_t sndLiftoff = cs_load_wav(LIFTOFF_WAV);
-	cs_loaded_sound_t sndPlaying = cs_load_wav(PLAYING_WAV);
-	cs_loaded_sound_t sndMenu = cs_load_wav(MENU_WAV);
+	//cs_loaded_sound_t sndPlaying = cs_load_wav(PLAYING_WAV);
+	//cs_loaded_sound_t sndMenu = cs_load_wav(MENU_WAV);
 	cs_loaded_sound_t sndCrash = cs_load_wav(CRASH_WAV);
 	VK2DImage imgTutorial = vk2dImageLoad(vk2dRendererGetDevice(), TUTORIAL_PNG);
 	VK2DTexture texTutorial = vk2dTextureLoad(imgTutorial, 0, 0, 400, 400);
@@ -785,8 +852,8 @@ void spacelink(int windowWidth, int windowHeight) {
 	game.assets.texMenu = texMenu;
 	game.cuteSound = ctx;
 	game.assets.sndLiftoff = &sndLiftoff;
-	game.assets.sndPlaying = &sndPlaying;
-	game.assets.sndMenu = &sndMenu;
+	//game.assets.sndPlaying = &sndPlaying;
+	//game.assets.sndMenu = &sndMenu;
 	game.assets.sndCrash = &sndCrash;
 	game.assets.texTutorial = texTutorial;
 
@@ -799,7 +866,7 @@ void spacelink(int windowWidth, int windowHeight) {
 
 	// Start the menu music
 	cs_stop_all_sounds(ctx);
-	playSound(&game, &sndMenu, true);
+	//playSound(&game, &sndMenu, true);
 
 	const uint32_t starCount = 50;
 	Star stars[starCount];
@@ -841,7 +908,7 @@ void spacelink(int windowWidth, int windowHeight) {
 				state = GameState_Game;
 				setupGame(&game);
 				cs_stop_all_sounds(ctx);
-				playSound(&game, &sndPlaying, true);
+				//playSound(&game, &sndPlaying, true);
 			} else if (status == Status_Quit) {
 				running = false;
 			}
@@ -854,7 +921,7 @@ void spacelink(int windowWidth, int windowHeight) {
 				running = false;
 				unloadGame(&game);
 				cs_stop_all_sounds(ctx);
-				playSound(&game, &sndMenu, true);
+				//playSound(&game, &sndMenu, true);
 			} else if (status == Status_Restart) {
 				setupGame(&game);
 			}
@@ -952,8 +1019,8 @@ void spacelink(int windowWidth, int windowHeight) {
 	vk2dImageFree(imgLaunch);
 	destroyFont(font);
 	cs_free_sound(&sndLiftoff);
-	cs_free_sound(&sndPlaying);
-	cs_free_sound(&sndMenu);
+	//cs_free_sound(&sndPlaying);
+	//cs_free_sound(&sndMenu);
 	cs_free_sound(&sndCrash);
 	cs_release_context(ctx);
 	vk2dRendererQuit();
