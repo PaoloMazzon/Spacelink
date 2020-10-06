@@ -220,6 +220,7 @@ typedef struct Game {
 	Particle *particle;
 	uint32_t particleCount;
 	uint32_t particleListSize;
+	real delta; // delta time based on 60fps (so 30fps = 2, 120 = 0.5)
 
 	// Important game state
 	Player player;
@@ -431,7 +432,7 @@ void updateSatellite(Game *game, uint32_t index) {
 
 	// Process thrusters/selecting
 	sat->selected = false;
-	sat->thrusterTimer -= 1;
+	sat->thrusterTimer -= game->delta;
 	if (!game->selectedSatellite && pointDistance(sat->x, sat->y, game->input.mx, game->input.my) < SATELLITE_SELECT_RADIUS) {
 		sat->selected = true;
 		if (game->input.lm && !game->input.plm)
@@ -444,12 +445,12 @@ void updateSatellite(Game *game, uint32_t index) {
 		boost = 1 + (SATELLITE_THRUSTER_VELOCITY * (sat->thrusterTimer / (SATELLITE_THRUSTER_DURATION * 60)));
 		addParticles(game, 3, sat->x, sat->y, sat->direction - VK2D_PI, 1.5, 2, WHITE);
 	}
-	sat->x += cosl(sat->direction) * (sat->velocity * boost);
-	sat->y += sinl(sat->direction) * (sat->velocity * boost);
+	sat->x += cosl(sat->direction) * ((sat->velocity * game->delta) * boost);
+	sat->y += sinl(sat->direction) * ((sat->velocity * game->delta) * boost);
 	// We have to add its current velocity vector to the vector of of planets gravity / 60 (its per second so must adjust it to be per frame)
 	real angle = pointAngle(sat->x, sat->y, GAME_WIDTH / 2, GAME_HEIGHT / 2);
-	real v3x = (cosl(sat->direction) * sat->velocity) + (cosl(angle) * (game->planet.gravity));
-	real v3y = (sinl(sat->direction) * sat->velocity) + (sinl(angle) * (game->planet.gravity));
+	real v3x = (cosl(sat->direction) * (sat->velocity)) + (cosl(angle) * (game->planet.gravity * game->delta));
+	real v3y = (sinl(sat->direction) * (sat->velocity)) + (sinl(angle) * (game->planet.gravity * game->delta));
 	sat->velocity = sqrtl(powl(v3x, 2) + powl(v3y, 2));
 	sat->direction = atan2l(v3y, v3x);
 
@@ -502,7 +503,7 @@ void updateAlien(Game *game) {
 	 * */
 	// Alien is basically a state machine
 	if (game->alien.mood == Alien_Standby) {
-		game->alien.cooldown -= 1;
+		game->alien.cooldown -= game->delta;
 		if (game->alien.cooldown <= 0) {
 			game->alien.mood = Alien_Roaming;
 			game->alien.x = -16;
@@ -511,7 +512,7 @@ void updateAlien(Game *game) {
 		}
 		game->alien.stolen = false;
 	} else if (game->alien.mood == Alien_Roaming) {
-		game->alien.x += ALIEN_MOVE_SPEED;
+		game->alien.x += ALIEN_MOVE_SPEED * game->delta;
 		game->alien.y = game->alien.baseY + sinl(game->time / 15) * ALIEN_OSCILLATION;
 
 		// Collisions
@@ -528,15 +529,15 @@ void updateAlien(Game *game) {
 			game->alien.cooldown = ALIEN_ROAMING_COOLDOWN * 60;
 		}
 	} else if (game->alien.mood == Alien_Angry) {
-		game->alien.cooldown -= 1;
+		game->alien.cooldown -= game->delta;
 		if (game->alien.cooldown <= 0) {
 			game->alien.mood = Alien_Stealing;
 			game->alien.x = -32;
 			game->alien.y = ((float)rand() / RAND_MAX) * GAME_WIDTH;
 		}
 	} else if (game->alien.mood == Alien_Casualty) {
-		game->alien.x += cosl(game->alien.direction) * ALIEN_MOVE_SPEED;
-		game->alien.y += sinl(game->alien.direction) * ALIEN_MOVE_SPEED;
+		game->alien.x += cosl(game->alien.direction) * ALIEN_MOVE_SPEED * game->delta;
+		game->alien.y += sinl(game->alien.direction) * ALIEN_MOVE_SPEED * game->delta;
 		if (game->alien.x > GAME_WIDTH || game->alien.x < -32 || game->alien.y > GAME_HEIGHT || game->alien.y < -32) {
 			game->alien.cooldown = ALIEN_PISSED_OFF_COOLDOWN * 60;
 			removeAlienFromScene(game, Alien_Angry);
@@ -549,15 +550,15 @@ void updateAlien(Game *game) {
 		} else if (!game->alien.stolen) {
 			Satellite *target = &game->satellites[0];
 			game->alien.direction = pointAngle(game->alien.x, game->alien.y, target->x, target->y);
-			game->alien.x += cosl(game->alien.direction) * ALIEN_MOVE_SPEED;
-			game->alien.y += sinl(game->alien.direction) * ALIEN_MOVE_SPEED;
+			game->alien.x += cosl(game->alien.direction) * ALIEN_MOVE_SPEED * game->delta;
+			game->alien.y += sinl(game->alien.direction) * ALIEN_MOVE_SPEED * game->delta;
 			if (pointDistance(game->alien.x, game->alien.y, target->x, target->y) < 16) {
 				game->alien.stolen = true;
 				removeSatellite(game, 0);
 			}
 		} else {
-			game->alien.x += cosl(game->alien.direction) * ALIEN_MOVE_SPEED;
-			game->alien.y += sinl(game->alien.direction) * ALIEN_MOVE_SPEED;
+			game->alien.x += cosl(game->alien.direction) * ALIEN_MOVE_SPEED * game->delta;
+			game->alien.y += sinl(game->alien.direction) * ALIEN_MOVE_SPEED * game->delta;
 			if (game->alien.x > GAME_WIDTH || game->alien.x < -32 || game->alien.y > GAME_HEIGHT || game->alien.y < -32) {
 				game->alien.cooldown = ALIEN_ROAMING_COOLDOWN * 60;
 				removeAlienFromScene(game, Alien_Standby);
@@ -617,8 +618,8 @@ Status updateGame(Game *game) {
 	real thetaX = THETA_SLIDER_X;
 	real thetaY = THETA_SLIDER_Y;
 	real time = game->time / 60;
-	game->player.standbyVelocity += sinl(time) * (VELOCITY_VARIANCE / 60);
-	game->player.standbyDirection += cosl(time) * (THETA_VARIANCE / 60);
+	game->player.standbyVelocity += sinl(time) * ((VELOCITY_VARIANCE / 60) * game->delta);
+	game->player.standbyDirection += cosl(time) * ((THETA_VARIANCE / 60) * game->delta);
 	game->player.standbyDirection = clamp(game->player.standbyDirection, MINIMUM_SATELLITE_ANGLE, MAXIMUM_SATELLITE_ANGLE);
 	game->player.standbyVelocity = clamp(game->player.standbyVelocity, MINIMUM_SATELLITE_VELOCITY, MAXIMUM_SATELLITE_VELOCITY);
 
@@ -626,13 +627,13 @@ Status updateGame(Game *game) {
 	if ((pointInRectangle(game->input.mx, game->input.my, velX, velY, SLIDER_W, SLIDER_H) && game->input.lm && !game->clickTheta) || (game->clickVelocity && !game->clickTheta)) {
 		real relative = clamp((game->input.mx - velX) / SLIDER_W, 0, 1);
 		real difference = (MINIMUM_SATELLITE_VELOCITY + (relative * (MAXIMUM_SATELLITE_VELOCITY - MINIMUM_SATELLITE_VELOCITY))) - game->player.standbyVelocity;
-		game->player.standbyVelocity += difference * HUD_BUTTON_WEIGHT;
+		game->player.standbyVelocity += difference * (HUD_BUTTON_WEIGHT * game->delta);
 		game->clickVelocity = true;
 	}
 	if ((pointInRectangle(game->input.mx, game->input.my, thetaX, thetaY, SLIDER_W, SLIDER_H) && game->input.lm && !game->clickVelocity) || (game->clickTheta && !game->clickVelocity)) {
 		real relative = clamp((game->input.mx - thetaX) / SLIDER_W, 0, 1);
 		real difference = (MINIMUM_SATELLITE_ANGLE + (relative * (MAXIMUM_SATELLITE_ANGLE - MINIMUM_SATELLITE_ANGLE))) - game->player.standbyDirection;
-		game->player.standbyDirection += difference * HUD_BUTTON_WEIGHT;
+		game->player.standbyDirection += difference * (HUD_BUTTON_WEIGHT * game->delta);
 		game->clickTheta = true;
 	}
 	if (!game->input.lm) { // they are not still clicking if they let go of the lmb
@@ -644,8 +645,8 @@ Status updateGame(Game *game) {
 	updateAlien(game);
 
 	// Launching satellites/cooldown/payout
-	if (game->standbyCooldown != 0) {
-		game->standbyCooldown -= 1;
+	if (game->standbyCooldown > 0) {
+		game->standbyCooldown -= game->delta;
 	} else if (launchButtonPressed && !game->clickVelocity && !game->clickTheta && game->playing) {
 		loadStandby(game);
 		game->standbyCooldown = STANDBY_COOLDOWN * 60;
@@ -653,7 +654,7 @@ Status updateGame(Game *game) {
 		game->selectedPerson = rand() % 4;
 		game->selectedHat = rand() % 4;
 	} else {
-		game->standby.cost -= MONEY_LOSS_PER_SECOND / 60;
+		game->standby.cost -= (MONEY_LOSS_PER_SECOND / 60) * game->delta;
 		game->standby.cost = game->standby.cost < MINIMUM_PAYOUT ? MINIMUM_PAYOUT : game->standby.cost;
 	}
 
@@ -673,6 +674,13 @@ void drawGame(Game *game) {
 	// Draw planet
 	vk2dRendererDrawTexture(game->assets.texPlanet, (GAME_WIDTH / 2) - game->planet.radius, (GAME_HEIGHT / 2) - game->planet.radius, (game->planet.radius / 100) * 2, (game->planet.radius / 100) * 2, -(game->time / 180), 50, 50);
 	vk2dRendererDrawTexture(game->assets.texCannon, (GAME_WIDTH / 2) + game->planet.radius - 4, (GAME_HEIGHT / 2) - 6, 1, 1, game->player.standbyDirection + VK2D_PI, 4, 6);
+	if (game->standbyCooldown <= 0) {
+		vk2dRendererSetColourMod(YELLOW);
+		real x = (GAME_WIDTH / 2) + game->planet.radius + (cosl(VK2D_PI-game->player.standbyDirection) * LAUNCH_DISTANCE);
+		real y = (GAME_HEIGHT / 2) + (sinl(VK2D_PI-game->player.standbyDirection) * LAUNCH_DISTANCE);
+		vk2dDrawCircle(x, y, game->standby.radius);
+		vk2dRendererSetColourMod(DEFAULT_COLOUR);
+	}
 
 	// Draw all satellites
 	for (uint32_t i = 0; i < game->numSatellites; i++)
@@ -683,7 +691,7 @@ void drawGame(Game *game) {
 	if (game->playing) {
 		/******************** Draw the HUD ********************/
 		// Standby
-		if (game->standbyCooldown == 0) {
+		if (game->standbyCooldown <= 0) {
 			drawFontNumber(game->font, "JOB PAYOUT: ", game->standby.cost, HUD_OFFSET_X, HUD_OFFSET_Y);
 		} else {
 			drawFontNumber(game->font, "NEXT JOB: ", (game->standbyCooldown / 60), HUD_OFFSET_X, HUD_OFFSET_Y);
@@ -753,7 +761,7 @@ Status updateMenu(Game *game) {
 		game->tutorialTimer = 0;
 
 	if (game->tutorialTimer > 0)
-		game->tutorialTimer--;
+		game->tutorialTimer -= game->delta;
 
 	return Status_Menu;
 }
@@ -798,6 +806,9 @@ void spacelink(int windowWidth, int windowHeight) {
 	bool running = true;
 	SDL_ShowCursor(SDL_DISABLE);
 	volatile real lastTime = SDL_GetPerformanceCounter();
+	real averageTimer = SDL_GetPerformanceCounter();
+	real averageFrameCount = 0;
+	real averageFramerate = 0;
 
 	/******************** VK2D initialization ********************/
 	VK2DRendererConfig config = {msaa_32x, sm_TripleBuffer, ft_Nearest};
@@ -861,6 +872,7 @@ void spacelink(int windowWidth, int windowHeight) {
 	GameState state = GameState_Menu;
 	Game game = {};
 	game.input.lastKeys = malloc(keyCount);
+	game.delta = 1;
 	game.font = font;
 	game.input.keys = SDL_GetKeyboardState(&keyCount);
 	game.assets.texGameOver = texGameOver;
@@ -963,10 +975,10 @@ void spacelink(int windowWidth, int windowHeight) {
 				setupGame(&game);
 			}
 		}
-		game.time += 1;
+		game.time += game.delta;
 
 		// Handle screen shake
-		game.shakeDuration--;
+		game.shakeDuration -= game.delta;
 		if (game.shakeDuration <= 0) {
 			cam.x = 0;
 			cam.y = 0;
@@ -989,9 +1001,9 @@ void spacelink(int windowWidth, int windowHeight) {
 
 		// Particles
 		for (uint32_t i = 0; i < game.particleCount; i++) {
-			game.particle[i].x += cosl(game.particle[i].direction) * game.particle[i].velocity;
-			game.particle[i].y += sinl(game.particle[i].direction) * game.particle[i].velocity;
-			game.particle[i].cooldown -= 1;
+			game.particle[i].x += cosl(game.particle[i].direction) * (game.particle[i].velocity * game.delta);
+			game.particle[i].y += sinl(game.particle[i].direction) * (game.particle[i].velocity * game.delta);
+			game.particle[i].cooldown -= game.delta;
 			if (game.particle[i].cooldown <= 0) {
 				for (uint32_t j = i; j < game.particleCount - 1; j++)
 					game.particle[j] = game.particle[j + 1];
@@ -1020,12 +1032,20 @@ void spacelink(int windowWidth, int windowHeight) {
 		vk2dRendererDrawShader(shaderPostFX, backbuffer, cam.x, cam.y, (real)WINDOW_WIDTH / GAME_WIDTH, (real)WINDOW_HEIGHT / GAME_HEIGHT, 0, 0, 0);
 		vk2dRendererEndFrame();
 
-		/******************** Lock to 60 ********************/
-		if ((real)SDL_GetPerformanceCounter() - lastTime < (real)SDL_GetPerformanceFrequency() / 60) {
-			while ((real)SDL_GetPerformanceCounter() - lastTime < (real)SDL_GetPerformanceFrequency() / 60) {
-				// do nothing lmao
-			}
+		/******************** Delta ********************/
+		real between = ((real)SDL_GetPerformanceCounter() - lastTime) / (real)SDL_GetPerformanceFrequency();
+		game.delta = between / (1.0f / 60.0f);
+
+		/******************** Window title/fps ********************/
+		averageFrameCount++;
+		if ((real)SDL_GetPerformanceCounter() - averageTimer >= (real)SDL_GetPerformanceFrequency()) {
+			averageFramerate = averageFrameCount;
+			averageFrameCount = 0;
+			averageTimer = SDL_GetPerformanceCounter();
 		}
+		char fps[50];
+		sprintf(fps, "Spacelink [%0.2lf FPS]", (double)averageFramerate);
+		SDL_SetWindowTitle(window, fps);
 		lastTime = SDL_GetPerformanceCounter();
 	}
 
