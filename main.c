@@ -800,7 +800,7 @@ void drawMenu(Game *game) {
 void spacelink(int windowWidth, int windowHeight) {
 	/******************** SDL initialization ********************/
 	SDL_Init(SDL_INIT_EVERYTHING);
-	SDL_Window *window = SDL_CreateWindow("Spacelink", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, windowWidth, windowHeight, SDL_WINDOW_VULKAN);
+	SDL_Window *window = SDL_CreateWindow("Spacelink", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, windowWidth, windowHeight, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
 	SDL_Event ev = {};
 	int keyCount;
 	bool running = true;
@@ -809,12 +809,16 @@ void spacelink(int windowWidth, int windowHeight) {
 	real averageTimer = SDL_GetPerformanceCounter();
 	real averageFrameCount = 0;
 	real averageFramerate = 0;
+	float xscale;
+	float yscale;
+	float posX;
+	float posY;
 
 	/******************** VK2D initialization ********************/
 	VK2DRendererConfig config = {msaa_32x, sm_TripleBuffer, ft_Nearest};
 	vk2dRendererInit(window, config);
 	VK2DTexture backbuffer = vk2dTextureCreate(vk2dRendererGetDevice(), GAME_WIDTH, GAME_HEIGHT);
-	vk2dRendererSetTextureCamera(true);
+	vk2dRendererSetTextureCamera(false);
 
 	/******************** Asset loading ********************/
 	SDL_SysWMinfo wmInfo;
@@ -927,8 +931,9 @@ void spacelink(int windowWidth, int windowHeight) {
 	while (running) {
 		//memcpy((void*)game.input.lastKeys, game.input.keys, keyCount);
 		while (SDL_PollEvent(&ev)) {
-			if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_CLOSE)
+			if (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_CLOSE) {
 				running = false;
+			}
 		}
 		VK2DCamera cam = vk2dRendererGetCamera();
 		//cs_mix(ctx);
@@ -937,6 +942,12 @@ void spacelink(int windowWidth, int windowHeight) {
 		SDL_PumpEvents();
 		int mx, my;
 		real xmouse, ymouse;
+		SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+		xscale = (real)windowWidth / GAME_WIDTH;
+		yscale = (real)windowHeight / GAME_HEIGHT;
+		if (xscale != yscale) xscale = yscale = min(xscale, yscale);
+		posX = roundf(((real)windowWidth - (xscale * GAME_WIDTH)) / 2);
+		posY = roundf(((real)windowHeight - (yscale * GAME_HEIGHT)) / 2);
 		uint32_t mState = SDL_GetMouseState(&mx, &my);
 		game.input.plm = game.input.lm;
 		game.input.pmm = game.input.mm;
@@ -944,8 +955,10 @@ void spacelink(int windowWidth, int windowHeight) {
 		game.input.lm = mState & SDL_BUTTON(SDL_BUTTON_LEFT);
 		game.input.mm = mState & SDL_BUTTON(SDL_BUTTON_MIDDLE);
 		game.input.rm = mState & SDL_BUTTON(SDL_BUTTON_RIGHT);
-		xmouse = (mx / ((real)windowWidth / GAME_WIDTH)) + cam.x;
-		ymouse = (my / ((real)windowHeight / GAME_HEIGHT)) + cam.y;
+		mx -= posX;
+		my -= posY;
+		xmouse = ((real)mx / xscale) + cam.x;
+		ymouse = ((real)my / yscale) + cam.y;
 		game.input.mx = xmouse;
 		game.input.my = ymouse;
 
@@ -986,10 +999,12 @@ void spacelink(int windowWidth, int windowHeight) {
 			cam.x = ((real)rand() / RAND_MAX) * SHAKE_INTENSITY;
 			cam.y = ((real)rand() / RAND_MAX) * SHAKE_INTENSITY;
 		}
+		cam.w = windowWidth;
+		cam.h = windowHeight;
 		vk2dRendererSetCamera(cam);
 
 		/******************** Begin drawing ********************/
-		vk2dRendererStartFrame(WHITE);
+		vk2dRendererStartFrame(BLACK);
 		vk2dRendererSetTarget(backbuffer);
 		vk2dRendererSetColourMod(SPACE_BLUE);
 		vk2dRendererClear();
@@ -1029,7 +1044,11 @@ void spacelink(int windowWidth, int windowHeight) {
 		/******************** End of drawing/cursor ********************/
 		vk2dDrawTexture(texCursor, roundl(xmouse - 2), roundl(ymouse - 2));
 		vk2dRendererSetTarget(VK2D_TARGET_SCREEN);
-		vk2dRendererDrawShader(shaderPostFX, backbuffer, cam.x, cam.y, (real)WINDOW_WIDTH / GAME_WIDTH, (real)WINDOW_HEIGHT / GAME_HEIGHT, 0, 0, 0);
+
+		// Figure out where to draw screen and how big
+		vk2dRendererSetViewport(0, 0, (real)windowWidth, (real)windowHeight);
+		vk2dRendererDrawShader(shaderPostFX, backbuffer, posX, posY, xscale, yscale, 0, 0, 0);
+		vk2dRendererSetViewport(0, 0, GAME_WIDTH, GAME_HEIGHT);
 		vk2dRendererEndFrame();
 
 		/******************** Delta ********************/
