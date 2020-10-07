@@ -221,6 +221,8 @@ typedef struct Game {
 	uint32_t particleCount;
 	uint32_t particleListSize;
 	real delta; // delta time based on 60fps (so 30fps = 2, 120 = 0.5)
+	real lastTime;
+	real time; // current frame (delta)
 
 	// Important game state
 	Player player;
@@ -234,7 +236,6 @@ typedef struct Game {
 
 	// Various variables for the game
 	real standbyCooldown; // This is in frames
-	real time; // current frame
 	bool clickTheta, clickVelocity;
 	Dosh highscore;
 	real shakeDuration;
@@ -322,24 +323,27 @@ void destroyFont(Font font) {
 /****************** Functions helpful to the game ******************/
 
 void addParticles(Game *game, uint32_t count, real x, real y, real direction, real velocity, real radius, vec4 colour) {
-	while (game->particleListSize <= game->particleCount + count) {
-		game->particle = realloc(game->particle, sizeof(Particle) * (game->particleListSize + DEFAULT_LIST_EXTENSION));
-		game->particleListSize += DEFAULT_LIST_EXTENSION;
+	if (floorl(game->lastTime) != floorl(game->time)) {
+		while (game->particleListSize <= game->particleCount + count) {
+			game->particle = realloc(game->particle,
+									 sizeof(Particle) * (game->particleListSize + DEFAULT_LIST_EXTENSION));
+			game->particleListSize += DEFAULT_LIST_EXTENSION;
+		}
+		for (uint32_t i = game->particleCount; i < game->particleCount + count; i++) {
+			real chance = ((real) rand() / RAND_MAX);
+			game->particle[i].x = x;
+			game->particle[i].y = y;
+			game->particle[i].cooldown = PARTICLE_LIFESPAN * 60;
+			game->particle[i].radius = radius * chance;
+			game->particle[i].direction = direction + ((VK2D_PI / 2) * chance);
+			game->particle[i].velocity = velocity;
+			game->particle[i].colour[0] = colour[0];
+			game->particle[i].colour[1] = colour[1];
+			game->particle[i].colour[2] = colour[2];
+			game->particle[i].colour[3] = colour[3];
+		}
+		game->particleCount += count;
 	}
-	for (uint32_t i = game->particleCount; i < game->particleCount + count; i++) {
-		real chance = ((real)rand() / RAND_MAX);
-		game->particle[i].x = x;
-		game->particle[i].y = y;
-		game->particle[i].cooldown = PARTICLE_LIFESPAN * 60;
-		game->particle[i].radius = radius * chance;
-		game->particle[i].direction = direction + ((VK2D_PI / 2) * chance);
-		game->particle[i].velocity = velocity;
-		game->particle[i].colour[0] = colour[0];
-		game->particle[i].colour[1] = colour[1];
-		game->particle[i].colour[2] = colour[2];
-		game->particle[i].colour[3] = colour[3];
-	}
-	game->particleCount += count;
 }
 
 void playSound(Game *game, cs_loaded_sound_t *sound, bool looping) {
@@ -393,8 +397,8 @@ void loadStandby(Game *game) {
 	game->numSatellites++;
 }
 
-void drawSatellite(real x, real y, bool drawAtSpecified, Satellite *sat) {
-	sat->seed++;
+void drawSatellite(Game *game, real x, real y, bool drawAtSpecified, Satellite *sat) {
+	sat->seed += game->delta;
 	sat->colour[0] = 0.6 + ((sinl(sat->seed / 30) * 0.4));
 	sat->colour[1] = 0.6 + ((sinl(sat->seed / 30) * 0.4));
 	sat->colour[2] = 0;
@@ -443,7 +447,7 @@ void updateSatellite(Game *game, uint32_t index) {
 	real boost = 1;
 	if (sat->thrusterTimer > 0) {
 		boost = 1 + (SATELLITE_THRUSTER_VELOCITY * (sat->thrusterTimer / (SATELLITE_THRUSTER_DURATION * 60)));
-		addParticles(game, 3, sat->x, sat->y, sat->direction - VK2D_PI, 1.5, 2, WHITE);
+		addParticles(game, 1, sat->x, sat->y, sat->direction - VK2D_PI, 1.5, 2, WHITE);
 	}
 	sat->x += cosl(sat->direction) * ((sat->velocity * game->delta) * boost);
 	sat->y += sinl(sat->direction) * ((sat->velocity * game->delta) * boost);
@@ -684,7 +688,7 @@ void drawGame(Game *game) {
 
 	// Draw all satellites
 	for (uint32_t i = 0; i < game->numSatellites; i++)
-		drawSatellite(0, 0, false, &game->satellites[i]);
+		drawSatellite(game, 0, 0, false, &game->satellites[i]);
 
 	drawAlien(game);
 
@@ -988,6 +992,7 @@ void spacelink(int windowWidth, int windowHeight) {
 				setupGame(&game);
 			}
 		}
+		game.lastTime = game.time;
 		game.time += game.delta;
 
 		// Handle screen shake
